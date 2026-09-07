@@ -38,6 +38,9 @@ OUTCOMES_CENTS_PER_SHARE = {
     "excellent": 25_000,
 }
 PAYOFF_DOLLARS = (20, 70, 130, 250)
+V_MIN_CENTS = 2_000
+V_MAX_CENTS = 25_000
+TAPE_K = 0.15
 
 
 def draw_belief(rng: random.Random) -> tuple[float, float, float, float]:
@@ -53,8 +56,30 @@ def reservation_cents(belief: tuple[float, float, float, float]) -> int:
     return int(round(dollars * 100))
 
 
+def draw_stubbornness(rng: random.Random) -> float:
+    return 0.2 + 0.7 * rng.random()
+
+
+def nudge_v(v: int, stubbornness: float, price: int) -> int:
+    nxt = int(round(v + (1 - stubbornness) * TAPE_K * (price - v)))
+    return max(V_MIN_CENTS, min(V_MAX_CENTS, nxt))
+
+
 def _money(cents: int) -> str:
     return f"${cents / 100:.2f}"
+
+
+@dataclass
+class PnlRow:
+    name: str
+    start_cents: int
+    end_cents: int
+    total_cents: int
+    pct: float
+
+
+def rank_pnl(rows: list[PnlRow]) -> list[PnlRow]:
+    return sorted(rows, key=lambda r: (-r.total_cents, r.name))
 
 
 @dataclass
@@ -63,10 +88,15 @@ class Investor:
     cash_cents: int
     shares: int
     belief: tuple[float, float, float, float]
+    start_cash_cents: int | None = None
+    stubbornness: float = 0.5
+    v_cents: int | None = None
 
-    @property
-    def v_cents(self) -> int:
-        return reservation_cents(self.belief)
+    def __post_init__(self) -> None:
+        if self.start_cash_cents is None:
+            self.start_cash_cents = self.cash_cents
+        if self.v_cents is None:
+            self.v_cents = reservation_cents(self.belief)
 
 
 def fill_sell_offer(
@@ -135,7 +165,14 @@ class Market:
         rng.shuffle(names)
         rng.shuffle(cash)
         investors = [
-            Investor(name, cash_cents, 0, draw_belief(rng))
+            Investor(
+                name,
+                cash_cents,
+                0,
+                draw_belief(rng),
+                start_cash_cents=cash_cents,
+                stubbornness=draw_stubbornness(rng),
+            )
             for name, cash_cents in zip(names, cash, strict=True)
         ]
         outcome = rng.choice(list(OUTCOMES_CENTS_PER_SHARE))
@@ -174,6 +211,16 @@ class Market:
             if inv.name == name:
                 return inv
         raise KeyError(name)
+
+    def pnl_rows(self) -> list[PnlRow]:
+        rows = []
+        for inv in self.investors:
+            start = inv.start_cash_cents or 0
+            end = inv.cash_cents
+            total = end - start
+            pct = 100.0 * total / start
+            rows.append(PnlRow(inv.name, start, end, total, pct))
+        return rank_pnl(rows)
 
     def step(self) -> bool:
         if self.done:
@@ -265,20 +312,28 @@ class Market:
         if side == "sell":
             seller = self.rng.choice(el)
             size = self.rng.randint(1, seller.shares)
+            price_at = seller.v_cents
             others = [i for i in self.investors if i is not seller]
             self.rng.shuffle(others)
             extra = fill_sell_offer(seller, others, size)
             self.log.extend(extra)
             if "takes" in extra[-1]:
-                self.last_price_cents = seller.v_cents
+                self.last_price_cents = price_at
+                self._follow_tape(price_at)
         else:
             buyer = self.rng.choice(el)
-            price = buyer.v_cents
-            max_n = buyer.cash_cents // price
+            price_at = buyer.v_cents
+            max_n = buyer.cash_cents // price_at
             size = self.rng.randint(1, max_n)
             others = [i for i in self.investors if i is not buyer]
             self.rng.shuffle(others)
             extra = fill_buy_offer(buyer, others, size)
             self.log.extend(extra)
             if "takes" in extra[-1]:
-                self.last_price_cents = price
+                self.last_price_cents = price_at
+                self._follow_tape(price_at)
+
+    def _follow_tape(self, price: int) -> None:
+        for inv in self.investors:
+            assert inv.v_cents is not None
+            inv.v_cents = nudge_v(inv.v_cents, inv.stubbornness, price)

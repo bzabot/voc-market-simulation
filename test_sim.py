@@ -104,5 +104,69 @@ class PayoutTests(unittest.TestCase):
         self.assertEqual(market.voyage_shown, "poor")
 
 
+class TapeTests(unittest.TestCase):
+    def test_low_stubbornness_moves_more_toward_print(self):
+        jumpy = sim.nudge_v(10_000, stubbornness=0.2, price=20_000)
+        stuck = sim.nudge_v(10_000, stubbornness=0.9, price=20_000)
+        self.assertGreater(jumpy, 10_000)
+        self.assertGreater(stuck, 10_000)
+        self.assertGreater(jumpy, stuck)
+
+    def test_failed_offer_does_not_change_v(self):
+        seller = sim.Investor("Anna", cash_cents=0, shares=20, belief=(0, 0, 0, 1))
+        buyer = sim.Investor("Pieter", cash_cents=50_000_00, shares=0, belief=(1, 0, 0, 0))
+        v0, v1 = seller.v_cents, buyer.v_cents
+        sim.fill_sell_offer(seller, buyer_order=[buyer], size=5)
+        self.assertEqual(seller.v_cents, v0)
+        self.assertEqual(buyer.v_cents, v1)
+
+    def test_nudge_clamps_to_payoff_range(self):
+        self.assertEqual(sim.nudge_v(25_000, stubbornness=0.0, price=30_000), 25_000)
+        self.assertEqual(sim.nudge_v(2_000, stubbornness=0.0, price=0), 2_000)
+
+
+class PnlTests(unittest.TestCase):
+    def test_total_and_percent_vs_opening_cash(self):
+        holder = sim.Investor(
+            "Jan",
+            cash_cents=0,
+            shares=100,
+            belief=(0.25, 0.25, 0.25, 0.25),
+            start_cash_cents=10_000_00,
+        )
+        market = sim.Market.for_test(
+            investors=[holder],
+            rng=random.Random(0),
+            treasury_shares=900,
+            company_cash_cents=0,
+            phase="voyage",
+            hidden_outcome="poor",
+        )
+        market.step()
+        row = market.pnl_rows()[0]
+        self.assertEqual(row.name, "Jan")
+        self.assertEqual(row.start_cents, 10_000_00)
+        self.assertEqual(row.end_cents, 100 * 7000)
+        self.assertEqual(row.total_cents, 100 * 7000 - 10_000_00)
+        self.assertAlmostEqual(row.pct, 100 * row.total_cents / row.start_cents)
+
+    def test_pnl_sorts_by_total_then_name(self):
+        a = sim.PnlRow("Berta", 100, 150, 50, 50.0)
+        b = sim.PnlRow("Anna", 100, 150, 50, 50.0)
+        c = sim.PnlRow("Carel", 100, 80, -20, -20.0)
+        ranked = sim.rank_pnl([c, a, b])
+        self.assertEqual([r.name for r in ranked], ["Anna", "Berta", "Carel"])
+
+
+class FormatTests(unittest.TestCase):
+    def test_signed_money_and_pct(self):
+        self.assertEqual(ui.signed_money(4_200_00), "+$4,200.00")
+        self.assertEqual(ui.signed_money(-1_200_00), "-$1,200.00")
+        self.assertEqual(ui.signed_money(0), "$0.00")
+        self.assertEqual(ui.signed_pct(28.0), "+28.0%")
+        self.assertEqual(ui.signed_pct(-12.3), "-12.3%")
+        self.assertEqual(ui.signed_pct(0.0), "0.0%")
+
+
 if __name__ == "__main__":
     unittest.main()
