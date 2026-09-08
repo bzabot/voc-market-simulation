@@ -158,6 +158,91 @@ class PnlTests(unittest.TestCase):
         self.assertEqual([r.name for r in ranked], ["Anna", "Berta", "Carel"])
 
 
+class SnapshotTests(unittest.TestCase):
+    def test_step_records_independent_frame(self):
+        market = sim.Market.for_test(
+            investors=[
+                sim.Investor("Anna", cash_cents=50_000_00, shares=0, belief=(0, 0, 0, 1)),
+            ],
+            rng=random.Random(1),
+        )
+        market.step()
+        frame = market.frames[-1]
+        cash_after_first = frame["investors"][0]["cash_cents"]
+        market.investor("Anna").cash_cents = 1
+        self.assertEqual(frame["investors"][0]["cash_cents"], cash_after_first)
+        self.assertNotEqual(market.investor("Anna").cash_cents, cash_after_first)
+
+    def test_frame_has_stubbornness_not_hidden_outcome(self):
+        market = sim.Market.for_test(
+            investors=[
+                sim.Investor(
+                    "Willem",
+                    cash_cents=60_000_00,
+                    shares=0,
+                    belief=(1, 0, 0, 0),
+                    stubbornness=0.8,
+                ),
+            ],
+            rng=random.Random(0),
+        )
+        market.step()
+        frame = market.frames[-1]
+        self.assertNotIn("hidden_outcome", frame)
+        self.assertIsNone(frame["voyage_shown"])
+        self.assertEqual(frame["investors"][0]["stubbornness"], 0.8)
+
+    def test_voyage_frame_shows_outcome_not_hidden_field(self):
+        holder = sim.Investor("Jan", cash_cents=0, shares=100, belief=(0.25, 0.25, 0.25, 0.25))
+        market = sim.Market.for_test(
+            investors=[holder],
+            rng=random.Random(0),
+            treasury_shares=900,
+            company_cash_cents=0,
+            phase="voyage",
+            hidden_outcome="poor",
+        )
+        market.step()
+        frame = market.frames[-1]
+        self.assertEqual(frame["voyage_shown"], "poor")
+        self.assertNotIn("hidden_outcome", frame)
+        self.assertTrue(frame["done"])
+
+    def test_ipo_fill_event_includes_name(self):
+        market = sim.Market.for_test(
+            investors=[
+                sim.Investor("Anna", cash_cents=50_000_00, shares=0, belief=(0, 0, 0, 1)),
+                sim.Investor("Willem", cash_cents=3_000_00, shares=0, belief=(1, 0, 0, 0)),
+            ],
+            rng=random.Random(1),
+        )
+        market.step()
+        ev = market.events[0]
+        self.assertEqual(ev["kind"], "ipo_fill")
+        self.assertEqual(ev["name"], "Anna")
+        self.assertEqual(ev["size"], 500)
+
+    def test_new_accepts_seed(self):
+        a = sim.Market.new(seed=42)
+        b = sim.Market.new(seed=42)
+        self.assertEqual([i.name for i in a.investors], [i.name for i in b.investors])
+        self.assertEqual(a.hidden_outcome, b.hidden_outcome)
+
+
+class TapeTestsFilter(unittest.TestCase):
+    def test_investor_tape_keeps_events_involving_name(self):
+        events = [
+            {"kind": "ipo_fill", "name": "Anna", "size": 10},
+            {"kind": "offer", "name": "Pieter", "size": 2},
+            {"kind": "take", "name": "Anna", "other": "Pieter", "size": 2},
+            {"kind": "payout", "name": "Willem", "size": 1},
+        ]
+        tape = sim.investor_tape(events, "Anna")
+        kinds = [e["kind"] for e in tape]
+        self.assertEqual(kinds, ["ipo_fill", "take"])
+        self.assertEqual(sim.investor_tape(events, "Pieter")[0]["kind"], "offer")
+
+
 class FormatTests(unittest.TestCase):
     def test_signed_money_and_pct(self):
         self.assertEqual(ui.signed_money(4_200_00), "+$4,200.00")

@@ -82,6 +82,10 @@ def rank_pnl(rows: list[PnlRow]) -> list[PnlRow]:
     return sorted(rows, key=lambda r: (-r.total_cents, r.name))
 
 
+def investor_tape(events: list[dict], name: str) -> list[dict]:
+    return [e for e in events if e.get("name") == name or e.get("other") == name]
+
+
 @dataclass
 class Investor:
     name: str
@@ -147,6 +151,8 @@ class Market:
     hidden_outcome: str = "lost"
     voyage_shown: str | None = None
     log: list[str] = field(default_factory=list)
+    events: list[dict] = field(default_factory=list)
+    frames: list[dict] = field(default_factory=list)
     phase: str = "ipo"
     header: str = "IPO"
     trade_tick: int = 0
@@ -158,8 +164,8 @@ class Market:
             self._gen = self._all_events()
 
     @classmethod
-    def new(cls, rng: random.Random | None = None) -> Market:
-        rng = rng or random.Random()
+    def new(cls, rng: random.Random | None = None, seed: int | None = None) -> Market:
+        rng = rng or random.Random(seed)
         names = NAMES[:]
         cash = CASH_LADDER_CENTS[:]
         rng.shuffle(names)
@@ -222,12 +228,39 @@ class Market:
             rows.append(PnlRow(inv.name, start, end, total, pct))
         return rank_pnl(rows)
 
+    def snapshot(self) -> dict:
+        return {
+            "header": self.header,
+            "phase": self.phase,
+            "last_price_cents": self.last_price_cents,
+            "treasury_shares": self.treasury_shares,
+            "company_cash_cents": self.company_cash_cents,
+            "voyage_shown": self.voyage_shown,
+            "done": self.done,
+            "investors": [
+                {
+                    "name": inv.name,
+                    "cash_cents": inv.cash_cents,
+                    "shares": inv.shares,
+                    "v_cents": inv.v_cents,
+                    "start_cash_cents": inv.start_cash_cents,
+                    "stubbornness": inv.stubbornness,
+                }
+                for inv in self.investors
+            ],
+            "log": list(self.log),
+            "events": [dict(e) for e in self.events],
+        }
+
     def step(self) -> bool:
         if self.done:
             return False
         assert self._gen is not None
         try:
             next(self._gen)
+            if self.phase == "voyage":
+                self.done = True
+            self.frames.append(self.snapshot())
             return True
         except StopIteration:
             self.done = True
@@ -264,15 +297,25 @@ class Market:
                     self.treasury_shares -= qty
                     self.company_cash_cents += qty * IPO_PRICE_CENTS
                     self.log.append(f"{inv.name} buys {qty} @ $100.00 IPO")
+                    self.events.append(
+                        {
+                            "kind": "ipo_fill",
+                            "name": inv.name,
+                            "size": qty,
+                            "price_cents": IPO_PRICE_CENTS,
+                        }
+                    )
                     fills += 1
                     yield
                     if self.treasury_shares == 0:
                         self.log.append("IPO closed")
+                        self.events.append({"kind": "ipo_closed"})
                         self.phase = "trade"
                         yield
                         return
             if fills == 0:
                 self.log.append("IPO closed")
+                self.events.append({"kind": "ipo_closed"})
                 self.phase = "trade"
                 yield
                 return
@@ -285,16 +328,34 @@ class Market:
         self.log.append(
             f"voyage: {self.hidden_outcome} ({_money(per)}/share)"
         )
+        self.events.append(
+            {"kind": "voyage", "name": self.hidden_outcome, "price_cents": per}
+        )
         for inv in self.investors:
             pay = inv.shares * per
             inv.cash_cents += pay
             self.log.append(
                 f"{inv.name} payout {inv.shares} shares -> {_money(pay)}"
             )
+            self.events.append(
+                {
+                    "kind": "payout",
+                    "name": inv.name,
+                    "size": inv.shares,
+                    "price_cents": pay,
+                }
+            )
         treas = self.treasury_shares * per
         self.company_cash_cents += treas
         self.log.append(
             f"treasury payout {self.treasury_shares} shares -> {_money(treas)}"
+        )
+        self.events.append(
+            {
+                "kind": "treasury_payout",
+                "size": self.treasury_shares,
+                "price_cents": treas,
+            }
         )
         yield
 
@@ -308,6 +369,7 @@ class Market:
             el = sell_el if side == "sell" else buy_el
         if not el:
             self.log.append("no eligible trader")
+            self.events.append({"kind": "no_eligible"})
             return
         if side == "sell":
             seller = self.rng.choice(el)
@@ -317,9 +379,29 @@ class Market:
             self.rng.shuffle(others)
             extra = fill_sell_offer(seller, others, size)
             self.log.extend(extra)
+            self.events.append(
+                {
+                    "kind": "offer",
+                    "name": seller.name,
+                    "size": size,
+                    "price_cents": price_at,
+                }
+            )
             if "takes" in extra[-1]:
+                taker = extra[-1].split()[0]
+                self.events.append(
+                    {
+                        "kind": "take",
+                        "name": taker,
+                        "other": seller.name,
+                        "size": size,
+                        "price_cents": price_at,
+                    }
+                )
                 self.last_price_cents = price_at
                 self._follow_tape(price_at)
+            else:
+                self.events.append({"kind": "nobody_takes"})
         else:
             buyer = self.rng.choice(el)
             price_at = buyer.v_cents
@@ -329,9 +411,29 @@ class Market:
             self.rng.shuffle(others)
             extra = fill_buy_offer(buyer, others, size)
             self.log.extend(extra)
+            self.events.append(
+                {
+                    "kind": "bid",
+                    "name": buyer.name,
+                    "size": size,
+                    "price_cents": price_at,
+                }
+            )
             if "takes" in extra[-1]:
+                taker = extra[-1].split()[0]
+                self.events.append(
+                    {
+                        "kind": "take",
+                        "name": taker,
+                        "other": buyer.name,
+                        "size": size,
+                        "price_cents": price_at,
+                    }
+                )
                 self.last_price_cents = price_at
                 self._follow_tape(price_at)
+            else:
+                self.events.append({"kind": "nobody_takes"})
 
     def _follow_tape(self, price: int) -> None:
         for inv in self.investors:

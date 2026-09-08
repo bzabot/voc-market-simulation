@@ -30,3 +30,18 @@ Uncertainty
 - Nobody knows which will happen
 - Different investors can have different beliefs
 - Shareholders can trade
+
+Layout:
+
+- `backend/` — FastAPI + simulation engine (Python, uv)
+- `frontend/` — React + Tailwind + Base UI (Vite)
+
+Run:
+
+- Terminal: `cd backend && uv run python main.py` (`--auto` to start in AUTO)
+- Browser: `cd backend && uv run uvicorn web:app --reload` then open http://127.0.0.1:8000/
+
+Frontend:
+
+- Build (served by FastAPI from `backend/static/`): `cd frontend && npm install && npm run build`
+- Dev server with hot reload (API proxied to :8000): `cd frontend && npm run dev`
