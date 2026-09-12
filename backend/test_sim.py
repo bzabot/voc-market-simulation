@@ -16,7 +16,8 @@ class BeliefTests(unittest.TestCase):
     def test_reservation_uses_four_payoffs_in_cents(self):
         # all mass on lost -> $20/share = 2000 cents
         self.assertEqual(sim.reservation_cents((1.0, 0.0, 0.0, 0.0)), 2000)
-        self.assertEqual(sim.reservation_cents((0.0, 0.0, 0.0, 1.0)), 25000)
+        self.assertEqual(sim.reservation_cents((0.0, 0.0, 0.0, 1.0)), 18000)
+        self.assertEqual(sim.reservation_cents((0.25, 0.25, 0.25, 0.25)), 10000)
 
 
 class IpoTests(unittest.TestCase):
@@ -121,7 +122,7 @@ class TapeTests(unittest.TestCase):
         self.assertEqual(buyer.v_cents, v1)
 
     def test_nudge_clamps_to_payoff_range(self):
-        self.assertEqual(sim.nudge_v(25_000, stubbornness=0.0, price=30_000), 25_000)
+        self.assertEqual(sim.nudge_v(18_000, stubbornness=0.0, price=30_000), 18_000)
         self.assertEqual(sim.nudge_v(2_000, stubbornness=0.0, price=0), 2_000)
 
 

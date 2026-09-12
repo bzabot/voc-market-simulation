@@ -37,7 +37,7 @@ Each investor also draws stubbornness once:
 
 `V ← round(V + (1 - s) * 0.15 * (P - V))`
 
-Then clamp to `[2000, 25000]` cents ($20 … $250).
+Then clamp to `[2000, 18000]` cents ($20 … $180).
 
 Apply this in the **same** playback event as the take, **before** the UI snapshot, so the cap table on that frame already shows the new `V`.
 
@@ -80,7 +80,7 @@ Sort rows by `total` descending (best first). Ties: name ascending. No treasury 
 
 - Fill at `P` moves a low-`s` investor’s `V` toward `P`; a high-`s` investor moves less (same `P`, same starting `V`).
 - Failed offer does not change `V`.
-- `V` never leaves `[2000, 25000]` after an update.
+- `V` never leaves `[2000, 18000]` after an update.
 - After payout, `total == end - start` and displayed `%` is `100 * total / start` for a fixture investor.
 
 ## Success

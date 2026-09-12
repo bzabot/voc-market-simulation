@@ -1,14 +1,14 @@
 export const TOTAL_SHARES = 1000
 export const IPO_PRICE_CENTS = 10_000
 export const V_MIN_CENTS = 2_000
-export const V_MAX_CENTS = 25_000
+export const V_MAX_CENTS = 18_000
 export const TRADE_TICKS = 40
 
 export const OUTCOMES = [
   { key: 'lost', cents: 2_000, label: 'Ship lost' },
   { key: 'poor', cents: 7_000, label: 'Poor expedition' },
   { key: 'normal', cents: 13_000, label: 'Normal expedition' },
-  { key: 'excellent', cents: 25_000, label: 'Excellent expedition' },
+  { key: 'excellent', cents: 18_000, label: 'Excellent expedition' },
 ]
 
 export function money(cents) {

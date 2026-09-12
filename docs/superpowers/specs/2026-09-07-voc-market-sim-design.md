@@ -30,7 +30,7 @@ Voyage terminal **company value** (drawn once at **process start**, independent 
 | Lost      | $20,000       | $20             |
 | Poor      | $70,000       | $70             |
 | Normal    | $130,000      | $130            |
-| Excellent | $250,000      | $250            |
+| Excellent | $180,000      | $180            |
 
 Draw with `random.choice` over these four equally. The draw is **hidden** until voyage resolution.
 
@@ -47,7 +47,7 @@ Draw with `random.choice` over these four equally. The draw is **hidden** until 
   - Normalize: `p_i = x_i / sum(x)` so they **sum to 1**.
   - Beliefs are **uninformed**: they do not depend on the hidden voyage draw.
 - Reservation value per share:  
-  `V = 20*p_lost + 70*p_poor + 130*p_normal + 250*p_excellent`, then round to **integer cents**. Use this same `V` for the cap table, IPO (`V >= 10000` cents i.e. $100), eligibility, shouts, and takes.
+  `V = 20*p_lost + 70*p_poor + 130*p_normal + 180*p_excellent`, then round to **integer cents**. Use this same `V` for the cap table, IPO (`V >= 10000` cents i.e. $100), eligibility, shouts, and takes. An equal-weight belief values a share at the $100 IPO price.
 
 ## Clock
 

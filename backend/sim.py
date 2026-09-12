@@ -35,11 +35,11 @@ OUTCOMES_CENTS_PER_SHARE = {
     "lost": 2_000,
     "poor": 7_000,
     "normal": 13_000,
-    "excellent": 25_000,
+    "excellent": 18_000,
 }
-PAYOFF_DOLLARS = (20, 70, 130, 250)
+PAYOFF_DOLLARS = (20, 70, 130, 180)
 V_MIN_CENTS = 2_000
-V_MAX_CENTS = 25_000
+V_MAX_CENTS = 18_000
 TAPE_K = 0.15
 
 

@@ -26,7 +26,7 @@ Uncertainty
 - Ship lost -> company value decrease to 20000
 - Poor expedition -> company value decrease to 70000
 - Normal expedition -> company value increase to 130000
-- Excellent expedition -> company value = 250000
+- Excellent expedition -> company value = 180000
 - Nobody knows which will happen
 - Different investors can have different beliefs
 - Shareholders can trade
