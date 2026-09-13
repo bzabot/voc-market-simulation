@@ -7,6 +7,7 @@ from typing import Iterator
 TOTAL_SHARES = 1000
 IPO_PRICE_CENTS = 10_000
 TRADE_TICKS = 40
+MAX_ORDER_SHARES = 10
 NAMES = [
     "Willem",
     "Anna",
@@ -83,7 +84,8 @@ def rank_pnl(rows: list[PnlRow]) -> list[PnlRow]:
 
 
 def investor_tape(events: list[dict], name: str) -> list[dict]:
-    return [e for e in events if e.get("name") == name or e.get("other") == name]
+    participant_fields = ("name", "buyer", "seller")
+    return [e for e in events if any(e.get(field) == name for field in participant_fields)]
 
 
 @dataclass
@@ -110,15 +112,25 @@ def fill_sell_offer(
 ) -> list[str]:
     price = seller.v_cents
     logs = [f"{seller.name} offers {size} @ {_money(price)}"]
+    remaining = size
     for buyer in buyer_order:
-        if buyer.v_cents >= price and buyer.cash_cents >= price * size:
-            buyer.shares += size
-            seller.shares -= size
-            buyer.cash_cents -= price * size
-            seller.cash_cents += price * size
-            logs.append(f"{buyer.name} takes {size} @ {_money(price)}")
-            return logs
-    logs.append("nobody takes")
+        if buyer.v_cents < price:
+            continue
+        quantity = min(remaining, buyer.cash_cents // price)
+        if quantity < 1:
+            continue
+        buyer.shares += quantity
+        seller.shares -= quantity
+        buyer.cash_cents -= price * quantity
+        seller.cash_cents += price * quantity
+        remaining -= quantity
+        logs.append(f"{buyer.name} takes {quantity} @ {_money(price)}")
+        if remaining == 0:
+            break
+    if remaining == size:
+        logs.append("nobody takes")
+    elif remaining:
+        logs.append(f"{remaining} remains unfilled")
     return logs
 
 
@@ -129,15 +141,25 @@ def fill_buy_offer(
 ) -> list[str]:
     price = buyer.v_cents
     logs = [f"{buyer.name} bids {size} @ {_money(price)}"]
+    remaining = size
     for seller in seller_order:
-        if seller.shares >= size and seller.v_cents <= price:
-            seller.shares -= size
-            buyer.shares += size
-            buyer.cash_cents -= price * size
-            seller.cash_cents += price * size
-            logs.append(f"{seller.name} takes {size} @ {_money(price)}")
-            return logs
-    logs.append("nobody takes")
+        if seller.v_cents > price:
+            continue
+        quantity = min(remaining, seller.shares, buyer.cash_cents // price)
+        if quantity < 1:
+            continue
+        seller.shares -= quantity
+        buyer.shares += quantity
+        buyer.cash_cents -= price * quantity
+        seller.cash_cents += price * quantity
+        remaining -= quantity
+        logs.append(f"{seller.name} takes {quantity} @ {_money(price)}")
+        if remaining == 0:
+            break
+    if remaining == size:
+        logs.append("nobody takes")
+    elif remaining:
+        logs.append(f"{remaining} remains unfilled")
     return logs
 
 
@@ -373,10 +395,11 @@ class Market:
             return
         if side == "sell":
             seller = self.rng.choice(el)
-            size = self.rng.randint(1, seller.shares)
+            size = self.rng.randint(1, min(seller.shares, MAX_ORDER_SHARES))
             price_at = seller.v_cents
             others = [i for i in self.investors if i is not seller]
             self.rng.shuffle(others)
+            shares_before = {buyer.name: buyer.shares for buyer in others}
             extra = fill_sell_offer(seller, others, size)
             self.log.extend(extra)
             self.events.append(
@@ -387,28 +410,40 @@ class Market:
                     "price_cents": price_at,
                 }
             )
-            if "takes" in extra[-1]:
-                taker = extra[-1].split()[0]
+            fills = [
+                (buyer, buyer.shares - shares_before[buyer.name])
+                for buyer in others
+                if buyer.shares > shares_before[buyer.name]
+            ]
+            for buyer, quantity in fills:
                 self.events.append(
                     {
-                        "kind": "take",
-                        "name": taker,
-                        "other": seller.name,
-                        "size": size,
+                        "kind": "trade",
+                        "tick": self.trade_tick,
+                        "buyer": buyer.name,
+                        "seller": seller.name,
+                        "quantity": quantity,
                         "price_cents": price_at,
                     }
                 )
+            filled = sum(quantity for _, quantity in fills)
+            if filled:
                 self.last_price_cents = price_at
                 self._follow_tape(price_at)
+                if filled < size:
+                    self.events.append(
+                        {"kind": "unfilled", "side": "sell", "quantity": size - filled}
+                    )
             else:
-                self.events.append({"kind": "nobody_takes"})
+                self.events.append({"kind": "nobody_takes", "side": "sell"})
         else:
             buyer = self.rng.choice(el)
             price_at = buyer.v_cents
             max_n = buyer.cash_cents // price_at
-            size = self.rng.randint(1, max_n)
+            size = self.rng.randint(1, min(max_n, MAX_ORDER_SHARES))
             others = [i for i in self.investors if i is not buyer]
             self.rng.shuffle(others)
+            shares_before = {seller.name: seller.shares for seller in others}
             extra = fill_buy_offer(buyer, others, size)
             self.log.extend(extra)
             self.events.append(
@@ -419,21 +454,32 @@ class Market:
                     "price_cents": price_at,
                 }
             )
-            if "takes" in extra[-1]:
-                taker = extra[-1].split()[0]
+            fills = [
+                (seller, shares_before[seller.name] - seller.shares)
+                for seller in others
+                if seller.shares < shares_before[seller.name]
+            ]
+            for seller, quantity in fills:
                 self.events.append(
                     {
-                        "kind": "take",
-                        "name": taker,
-                        "other": buyer.name,
-                        "size": size,
+                        "kind": "trade",
+                        "tick": self.trade_tick,
+                        "buyer": buyer.name,
+                        "seller": seller.name,
+                        "quantity": quantity,
                         "price_cents": price_at,
                     }
                 )
+            filled = sum(quantity for _, quantity in fills)
+            if filled:
                 self.last_price_cents = price_at
                 self._follow_tape(price_at)
+                if filled < size:
+                    self.events.append(
+                        {"kind": "unfilled", "side": "buy", "quantity": size - filled}
+                    )
             else:
-                self.events.append({"kind": "nobody_takes"})
+                self.events.append({"kind": "nobody_takes", "side": "buy"})
 
     def _follow_tape(self, price: int) -> None:
         for inv in self.investors:

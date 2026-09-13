@@ -1,5 +1,6 @@
 import random
 import unittest
+from unittest.mock import patch
 
 import sim
 import ui
@@ -77,6 +78,153 @@ class TradeTests(unittest.TestCase):
         self.assertEqual(seller.shares, 20)
         self.assertEqual(buyer.shares, 0)
         self.assertEqual(logs[-1], "nobody takes")
+
+    def test_failed_sell_offer_identifies_missing_buyer(self):
+        market = sim.Market.for_test(
+            investors=[sim.Investor("Anna", cash_cents=0, shares=20, belief=(0, 0, 0, 1))],
+            rng=random.Random(0),
+            treasury_shares=0,
+            phase="trade",
+        )
+        market._one_trade()
+        self.assertEqual(market.events[-1], {"kind": "nobody_takes", "side": "sell"})
+
+    def test_failed_buy_bid_identifies_missing_seller(self):
+        market = sim.Market.for_test(
+            investors=[sim.Investor("Anna", cash_cents=50_000_00, shares=0, belief=(0, 0, 0, 1))],
+            rng=random.Random(0),
+            treasury_shares=0,
+            phase="trade",
+        )
+        market._one_trade()
+        self.assertEqual(market.events[-1], {"kind": "nobody_takes", "side": "buy"})
+
+    def test_sell_offer_records_normalized_trade(self):
+        seller = sim.Investor("Pieter", cash_cents=0, shares=10, belief=(1, 0, 0, 0))
+        buyer = sim.Investor("Anna", cash_cents=50_000_00, shares=0, belief=(0, 0, 0, 1))
+        market = sim.Market.for_test(
+            investors=[seller, buyer],
+            rng=random.Random(1),
+            treasury_shares=0,
+            phase="trade",
+        )
+        market.trade_tick = 7
+
+        market._one_trade()
+
+        event = market.events[-1]
+        self.assertEqual(event["kind"], "trade")
+        self.assertEqual(event["tick"], 7)
+        self.assertEqual(event["buyer"], "Anna")
+        self.assertEqual(event["seller"], "Pieter")
+        self.assertEqual(event["quantity"], buyer.shares)
+        self.assertGreater(event["quantity"], 0)
+        self.assertEqual(event["price_cents"], 2_000)
+
+    def test_buy_bid_records_normalized_trade(self):
+        seller = sim.Investor("Pieter", cash_cents=0, shares=10, belief=(1, 0, 0, 0))
+        buyer = sim.Investor("Anna", cash_cents=18_000, shares=0, belief=(0, 0, 0, 1))
+        market = sim.Market.for_test(
+            investors=[seller, buyer],
+            rng=random.Random(0),
+            treasury_shares=0,
+            phase="trade",
+        )
+        market.trade_tick = 9
+
+        market._one_trade()
+
+        event = market.events[-1]
+        self.assertEqual(event["kind"], "trade")
+        self.assertEqual(event["tick"], 9)
+        self.assertEqual(event["buyer"], "Anna")
+        self.assertEqual(event["seller"], "Pieter")
+        self.assertGreater(event["quantity"], 0)
+        self.assertEqual(event["price_cents"], 18_000)
+
+    def test_sell_offer_partially_fills_across_buyers(self):
+        seller = sim.Investor("Pieter", cash_cents=0, shares=10, belief=(1, 0, 0, 0))
+        anna = sim.Investor("Anna", cash_cents=3 * 2_000, shares=0, belief=(0, 0, 0, 1))
+        maria = sim.Investor("Maria", cash_cents=4 * 2_000, shares=0, belief=(0, 0, 0, 1))
+
+        sim.fill_sell_offer(seller, buyer_order=[anna, maria], size=10)
+
+        self.assertEqual(seller.shares, 3)
+        self.assertEqual(anna.shares, 3)
+        self.assertEqual(maria.shares, 4)
+        self.assertEqual(anna.cash_cents, 0)
+        self.assertEqual(maria.cash_cents, 0)
+
+    def test_partial_order_records_each_fill_and_unfilled_remainder(self):
+        seller = sim.Investor("Pieter", cash_cents=0, shares=50, belief=(1, 0, 0, 0))
+        anna = sim.Investor("Anna", cash_cents=3 * 2_000, shares=0, belief=(0, 0, 0, 1))
+        maria = sim.Investor("Maria", cash_cents=4 * 2_000, shares=0, belief=(0, 0, 0, 1))
+        market = sim.Market.for_test(
+            investors=[seller, anna, maria],
+            rng=random.Random(1),
+            treasury_shares=0,
+            phase="trade",
+        )
+        market.trade_tick = 11
+
+        with patch.object(market.rng, "randint", return_value=10):
+            market._one_trade()
+
+        offer = market.events[0]
+        trades = [event for event in market.events if event["kind"] == "trade"]
+        unfilled = market.events[-1]
+        self.assertEqual({event["buyer"] for event in trades}, {"Anna", "Maria"})
+        self.assertTrue(all(event["seller"] == "Pieter" for event in trades))
+        self.assertTrue(all(event["tick"] == 11 for event in trades))
+        self.assertEqual(sum(event["quantity"] for event in trades), 7)
+        self.assertEqual(
+            unfilled,
+            {
+                "kind": "unfilled",
+                "side": "sell",
+                "quantity": offer["size"] - 7,
+            },
+        )
+
+    def test_buy_bid_partially_fills_across_sellers(self):
+        buyer = sim.Investor("Anna", cash_cents=10 * 18_000, shares=0, belief=(0, 0, 0, 1))
+        pieter = sim.Investor("Pieter", cash_cents=0, shares=3, belief=(1, 0, 0, 0))
+        maria = sim.Investor("Maria", cash_cents=0, shares=4, belief=(1, 0, 0, 0))
+
+        sim.fill_buy_offer(buyer, seller_order=[pieter, maria], size=10)
+
+        self.assertEqual(buyer.shares, 7)
+        self.assertEqual(pieter.shares, 0)
+        self.assertEqual(maria.shares, 0)
+        self.assertEqual(buyer.cash_cents, 3 * 18_000)
+
+    def test_sell_orders_are_capped_at_maximum_size(self):
+        seller = sim.Investor("Pieter", cash_cents=0, shares=1_000, belief=(1, 0, 0, 0))
+        buyer = sim.Investor("Anna", cash_cents=50_000_00, shares=0, belief=(0, 0, 0, 1))
+        market = sim.Market.for_test(
+            investors=[seller, buyer],
+            rng=random.Random(1),
+            treasury_shares=0,
+            phase="trade",
+        )
+
+        market._one_trade()
+
+        self.assertLessEqual(market.events[0]["size"], 10)
+
+    def test_buy_orders_are_capped_at_maximum_size(self):
+        seller = sim.Investor("Pieter", cash_cents=0, shares=1_000, belief=(1, 0, 0, 0))
+        buyer = sim.Investor("Anna", cash_cents=50_000_00, shares=0, belief=(0, 0, 0, 1))
+        market = sim.Market.for_test(
+            investors=[seller, buyer],
+            rng=random.Random(0),
+            treasury_shares=0,
+            phase="trade",
+        )
+
+        market._one_trade()
+
+        self.assertLessEqual(market.events[0]["size"], 10)
 
 
 class LogTailTests(unittest.TestCase):
@@ -235,13 +383,19 @@ class TapeTestsFilter(unittest.TestCase):
         events = [
             {"kind": "ipo_fill", "name": "Anna", "size": 10},
             {"kind": "offer", "name": "Pieter", "size": 2},
-            {"kind": "take", "name": "Anna", "other": "Pieter", "size": 2},
+            {
+                "kind": "trade",
+                "buyer": "Anna",
+                "seller": "Pieter",
+                "quantity": 2,
+            },
             {"kind": "payout", "name": "Willem", "size": 1},
         ]
         tape = sim.investor_tape(events, "Anna")
         kinds = [e["kind"] for e in tape]
-        self.assertEqual(kinds, ["ipo_fill", "take"])
+        self.assertEqual(kinds, ["ipo_fill", "trade"])
         self.assertEqual(sim.investor_tape(events, "Pieter")[0]["kind"], "offer")
+        self.assertEqual(sim.investor_tape(events, "Pieter")[1]["kind"], "trade")
 
 
 class FormatTests(unittest.TestCase):

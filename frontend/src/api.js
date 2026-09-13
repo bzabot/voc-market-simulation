@@ -11,8 +11,7 @@ async function api(path, opts) {
   return r.json()
 }
 
-export const newSession = (seed) =>
-  api('/api/session', { method: 'POST', body: JSON.stringify({ seed }) })
+export const newSession = () => api('/api/session', { method: 'POST' })
 
 export const stepSession = () => api('/api/session/step', { method: 'POST' })
 

@@ -10,7 +10,7 @@ const PHASE_STYLE = {
 
 const PHASE_LABEL = { ipo: 'Initial Offering', trade: 'Open Trading', voyage: 'The Voyage' }
 
-export default function Masthead({ frame, prevFrame, replaying }) {
+export default function Masthead({ frame, prevFrame, replaying, viewingHistory }) {
   const price = frame?.last_price_cents ?? null
   const prev = prevFrame?.last_price_cents ?? null
   const delta = price != null && prev != null ? price - prev : 0
@@ -86,6 +86,11 @@ export default function Masthead({ frame, prevFrame, replaying }) {
         {replaying && (
           <span className="rounded-full border border-parch-600/50 bg-parch-500/10 px-3 py-1 text-[11px] font-semibold tracking-[0.14em] text-parch-300 uppercase">
             Replay
+          </span>
+        )}
+        {viewingHistory && (
+          <span className="rounded-full border border-parch-600/50 bg-parch-500/10 px-3 py-1 text-[11px] font-semibold tracking-[0.14em] text-parch-300 uppercase">
+            History
           </span>
         )}
       </div>

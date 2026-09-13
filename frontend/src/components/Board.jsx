@@ -26,10 +26,10 @@ export default function Board({ frame, newEvents }) {
   // Who was involved in the newest events, and did they gain or spend?
   const flash = new Map()
   for (const e of newEvents) {
-    if (e.kind === 'take' || e.kind === 'ipo_fill' || e.kind === 'payout') {
-      flash.set(e.name, e.kind === 'payout' ? 'gain' : 'gain')
-      if (e.other) flash.set(e.other, 'loss')
-    }
+    if (e.kind === 'trade') {
+      flash.set(e.buyer, 'gain')
+      flash.set(e.seller, 'loss')
+    } else if (e.kind === 'ipo_fill' || e.kind === 'payout') flash.set(e.name, 'gain')
   }
 
   return (

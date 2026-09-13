@@ -16,13 +16,15 @@ export default function App() {
   const [auto, setAuto] = useState(false)
   const [replaying, setReplaying] = useState(false)
   const [viewIndex, setViewIndex] = useState(0)
-  const [seed, setSeed] = useState('1')
+  const [historyIndex, setHistoryIndex] = useState(null)
   const [selectedName, setSelectedName] = useState(null)
   const [inspect, setInspect] = useState(null)
 
   const liveFrame = history.length ? history[history.length - 1] : null
-  const frame = replaying ? history[viewIndex] : liveFrame
-  const prevFrame = replaying ? history[viewIndex - 1] : history[history.length - 2]
+  const viewingHistory = !replaying && historyIndex != null
+  const shownIndex = replaying ? viewIndex : historyIndex
+  const frame = shownIndex == null ? liveFrame : history[shownIndex]
+  const prevFrame = shownIndex == null ? history[history.length - 2] : history[shownIndex - 1]
 
   const prevEventCount = prevFrame?.events.length ?? 0
   const newEvents = frame ? frame.events.slice(prevEventCount) : []
@@ -32,6 +34,7 @@ export default function App() {
     const data = await getFrames()
     setHistory(data.frames)
     setViewIndex(data.frames.length - 1)
+    setHistoryIndex(null)
     setDone(true)
     setReplaying(true)
     const leaders = [...data.frames[data.frames.length - 1].investors].sort(
@@ -62,10 +65,22 @@ export default function App() {
     setReplaying(false)
     setHistory([])
     setViewIndex(0)
+    setHistoryIndex(null)
     setSelectedName(null)
     setInspect(null)
-    await newSession(seed === '' ? null : Number(seed))
-  }, [seed])
+    await newSession()
+  }, [])
+
+  const showPrevious = useCallback(() => {
+    setAuto(false)
+    setHistoryIndex((current) => {
+      if (history.length < 2) return null
+      if (current == null) return history.length - 2
+      return Math.max(0, current - 1)
+    })
+  }, [history.length])
+
+  const showLive = useCallback(() => setHistoryIndex(null), [])
 
   // auto-play
   const stepRef = useRef(stepOnce)
@@ -101,11 +116,16 @@ export default function App() {
   useEffect(() => {
     const onKey = (ev) => {
       if (ev.target.matches('input, select, textarea')) return
-      if (ev.key === ' ' || ev.key === 'Enter') {
+      if (ev.key === 'ArrowLeft' && !replaying) {
+        ev.preventDefault()
+        showPrevious()
+      } else if ((ev.key === 'l' || ev.key === 'L') && viewingHistory) {
+        showLive()
+      } else if ((ev.key === ' ' || ev.key === 'Enter') && !viewingHistory) {
         ev.preventDefault()
         setAuto(false)
         stepRef.current()
-      } else if (ev.key === 'a' || ev.key === 'A') {
+      } else if ((ev.key === 'a' || ev.key === 'A') && !viewingHistory) {
         setAuto((a) => !a)
       } else if (ev.key === 's' || ev.key === 'S') {
         setAuto(false)
@@ -113,22 +133,30 @@ export default function App() {
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [])
+  }, [replaying, showLive, showPrevious, viewingHistory])
 
   return (
     <div className="flex min-h-screen flex-col">
-      <Masthead frame={frame} prevFrame={prevFrame} replaying={replaying} />
+      <Masthead
+        frame={frame}
+        prevFrame={prevFrame}
+        replaying={replaying}
+        viewingHistory={viewingHistory}
+      />
       <PhaseTimeline frame={frame} />
       <Controls
         auto={auto}
         done={done}
-        seed={seed}
-        onSeedChange={setSeed}
+        viewingHistory={viewingHistory}
+        canGoPrevious={!done && history.length > 1 && historyIndex !== 0}
+        historyPosition={viewingHistory ? `${historyIndex + 1} / ${history.length}` : null}
         onStep={() => {
           setAuto(false)
           stepOnce()
         }}
         onToggleAuto={() => setAuto((a) => !a)}
+        onPrevious={showPrevious}
+        onLive={showLive}
         onNewRun={newRun}
       />
 
@@ -136,12 +164,12 @@ export default function App() {
         <div className="min-w-0 space-y-4">
           <PriceChart
             history={history}
-            upto={replaying ? viewIndex + 1 : history.length}
+            upto={shownIndex == null ? history.length : shownIndex + 1}
             frame={frame}
           />
           <Board frame={frame} newEvents={newEvents} />
         </div>
-        <EventFeed events={frame?.events ?? []} freshCount={replaying ? 0 : newEvents.length} />
+        <EventFeed events={frame?.events ?? []} freshCount={replaying || viewingHistory ? 0 : newEvents.length} />
       </main>
 
       {replaying && history.length > 0 && (

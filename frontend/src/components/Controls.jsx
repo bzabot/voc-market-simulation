@@ -1,11 +1,22 @@
-export default function Controls({ auto, done, seed, onSeedChange, onStep, onToggleAuto, onNewRun }) {
+export default function Controls({
+  auto,
+  done,
+  viewingHistory,
+  canGoPrevious,
+  historyPosition,
+  onStep,
+  onToggleAuto,
+  onPrevious,
+  onLive,
+  onNewRun,
+}) {
   return (
     <div className="flex flex-wrap items-center gap-2.5 px-5 py-3">
-      <button type="button" className="btn btn-primary" onClick={onStep} disabled={done}>
+      <button type="button" className="btn btn-primary" onClick={onStep} disabled={done || viewingHistory}>
         Step
         <kbd>space</kbd>
       </button>
-      <button type="button" className="btn" onClick={onToggleAuto} disabled={done && !auto}>
+      <button type="button" className="btn" onClick={onToggleAuto} disabled={(done && !auto) || viewingHistory}>
         {auto ? (
           <>
             <PauseGlyph /> Pause
@@ -17,23 +28,20 @@ export default function Controls({ auto, done, seed, onSeedChange, onStep, onTog
         )}
         <kbd>A</kbd>
       </button>
+      <button type="button" className="btn" onClick={onPrevious} disabled={!canGoPrevious}>
+        Previous
+        <kbd>&larr;</kbd>
+      </button>
+      <button type="button" className="btn" onClick={onLive} disabled={!viewingHistory}>
+        Live
+        {historyPosition && <span className="tnum text-[10px] text-parch-500">{historyPosition}</span>}
+      </button>
       <button type="button" className="btn btn-danger" onClick={onNewRun}>
         New run
       </button>
 
-      <label className="ml-1 flex items-center gap-2 text-[12px] text-parch-500">
-        seed
-        <input
-          type="number"
-          value={seed}
-          onChange={(e) => onSeedChange(e.target.value)}
-          className="tnum w-20 rounded-lg border border-ink-600 bg-ink-950 px-2.5 py-1.5 text-[13px] text-parch-200 outline-none transition-colors focus:border-gold-600/70"
-          placeholder="random"
-        />
-      </label>
-
       <p className="ml-auto hidden text-[11px] text-parch-600 lg:block">
-        <kbd>space</kbd> step &middot; <kbd>A</kbd> auto &middot; <kbd>S</kbd> stop
+        <kbd>space</kbd> step &middot; <kbd>A</kbd> auto &middot; <kbd>&larr;</kbd> previous &middot; <kbd>L</kbd> live
       </p>
     </div>
   )

@@ -41,6 +41,17 @@ Run:
 - Terminal: `cd backend && uv run python main.py` (`--auto` to start in AUTO)
 - Browser: `cd backend && uv run uvicorn web:app --reload` then open http://127.0.0.1:8000/
 
+Headless runs (dump results to JSON for auditing):
+
+- `cd backend && uv run python run.py` — one run with a random seed
+- `uv run python run.py --count 10` — several runs in one go
+- `uv run python run.py --seed 42` — reproduce a specific run
+- `uv run python run.py --out mydir` — custom output directory (default: `backend/runs/`)
+
+Each run writes `runs/run-<timestamp>-seed<n>.json` with the seed, hidden voyage
+outcome, price ticker, full event stream and log, and per-investor P&L. The seed
+is always recorded, so any suspicious run can be replayed exactly with `--seed`.
+
 Frontend:
 
 - Build (served by FastAPI from `backend/static/`): `cd frontend && npm install && npm run build`

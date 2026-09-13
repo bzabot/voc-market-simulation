@@ -12,3 +12,6 @@ wheels/
 
 # Frontend build output (built from frontend/ via `npm run build`)
 backend/static/
+
+# Headless simulation dumps (backend/run.py)
+backend/runs/

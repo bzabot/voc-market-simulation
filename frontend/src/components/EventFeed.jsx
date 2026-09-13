@@ -7,7 +7,8 @@ export const KIND_STYLE = {
   ipo_closed: { label: 'IPO', cls: 'border-ink-600 bg-ink-800 text-parch-400' },
   offer: { label: 'Offer', cls: 'border-loss-500/50 bg-loss-500/10 text-loss-300' },
   bid: { label: 'Bid', cls: 'border-sea-500/50 bg-sea-500/10 text-sea-300' },
-  take: { label: 'Trade', cls: 'border-gain-500/50 bg-gain-500/10 text-gain-300' },
+  trade: { label: 'Trade', cls: 'border-gain-500/50 bg-gain-500/10 text-gain-300' },
+  unfilled: { label: 'Open', cls: 'border-ink-600 bg-ink-800 text-parch-500' },
   nobody_takes: { label: 'Miss', cls: 'border-ink-600 bg-ink-800 text-parch-500' },
   no_eligible: { label: 'Miss', cls: 'border-ink-600 bg-ink-800 text-parch-500' },
   voyage: { label: 'Voyage', cls: 'border-voc-500/60 bg-voc-500/10 text-voc-400' },
@@ -37,15 +38,19 @@ export function EventBody({ e }) {
       return <><Name>{e.name}</Name> offers {e.size} @ <Money cents={e.price_cents} /></>
     case 'bid':
       return <><Name>{e.name}</Name> bids {e.size} @ <Money cents={e.price_cents} /></>
-    case 'take':
+    case 'trade':
       return (
         <>
-          <Name>{e.name}</Name> takes {e.size} @ <Money cents={e.price_cents} />
-          {e.other ? <> from <Name>{e.other}</Name></> : null}
+          <Name>{e.buyer}</Name> buys {e.quantity} from <Name>{e.seller}</Name> @{' '}
+          <Money cents={e.price_cents} />
         </>
       )
     case 'nobody_takes':
-      return <>Nobody takes</>
+      if (e.side === 'sell') return <>No buyer accepts the offer</>
+      if (e.side === 'buy') return <>No seller accepts the bid</>
+      return <>No trader accepts the order</>
+    case 'unfilled':
+      return <>{e.quantity} shares remain unfilled</>
     case 'no_eligible':
       return <>No eligible trader</>
     case 'voyage':
