@@ -19,7 +19,7 @@ import random
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sim import Market, OUTCOMES_CENTS_PER_SHARE
+from sim import IPO_PRICE_CENTS, TOTAL_SHARES, Market, OUTCOMES_CENTS_PER_SHARE
 
 
 def run_once(seed: int) -> dict:
@@ -51,14 +51,15 @@ def run_once(seed: int) -> dict:
         }
         for inv in market.investors
     ]
+    shares_sold = TOTAL_SHARES - market.treasury_shares
 
     return {
         "seed": seed,
         "hidden_outcome": market.hidden_outcome,
         "payout_cents_per_share": OUTCOMES_CENTS_PER_SHARE[market.hidden_outcome],
         "ipo": {
-            "shares_sold": 1000 - market.treasury_shares,
-            "company_cash_cents": market.company_cash_cents,
+            "shares_sold": shares_sold,
+            "company_cash_cents": shares_sold * IPO_PRICE_CENTS,
         },
         "final_price_cents": market.last_price_cents,
         "ticker": ticker,
