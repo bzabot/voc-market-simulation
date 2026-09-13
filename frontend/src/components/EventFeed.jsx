@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { investorColor } from '../colors'
 import { money } from '../format'
+import TradeAttempt from './TradeAttempt'
 
 export const KIND_STYLE = {
   ipo_fill: { label: 'IPO', cls: 'border-gold-600/50 bg-gold-500/10 text-gold-300' },
@@ -8,7 +9,6 @@ export const KIND_STYLE = {
   offer: { label: 'Offer', cls: 'border-loss-500/50 bg-loss-500/10 text-loss-300' },
   bid: { label: 'Bid', cls: 'border-sea-500/50 bg-sea-500/10 text-sea-300' },
   trade: { label: 'Trade', cls: 'border-gain-500/50 bg-gain-500/10 text-gain-300' },
-  unfilled: { label: 'Open', cls: 'border-ink-600 bg-ink-800 text-parch-500' },
   nobody_takes: { label: 'Miss', cls: 'border-ink-600 bg-ink-800 text-parch-500' },
   no_eligible: { label: 'Miss', cls: 'border-ink-600 bg-ink-800 text-parch-500' },
   voyage: { label: 'Voyage', cls: 'border-voc-500/60 bg-voc-500/10 text-voc-400' },
@@ -49,8 +49,6 @@ export function EventBody({ e }) {
       if (e.side === 'sell') return <>No buyer accepts the offer</>
       if (e.side === 'buy') return <>No seller accepts the bid</>
       return <>No trader accepts the order</>
-    case 'unfilled':
-      return <>{e.quantity} shares remain unfilled</>
     case 'no_eligible':
       return <>No eligible trader</>
     case 'voyage':
@@ -84,17 +82,28 @@ export default function EventFeed({ events, freshCount }) {
         {events.length === 0 && (
           <p className="py-8 text-center text-sm text-parch-600">(waiting for the opening bell)</p>
         )}
-        {events.map((e, i) => {
+        {groupTradeAttempts(events).map(({ e, order, result, index, lastIndex }) => {
+          if (order) {
+            return (
+              <TradeAttempt
+                key={`trade-${order.tick}-${index}`}
+                order={order}
+                result={result}
+                number={index + 1}
+                fresh={lastIndex >= events.length - freshCount}
+              />
+            )
+          }
           const style = KIND_STYLE[e.kind] ?? KIND_STYLE.nobody_takes
-          const fresh = i >= events.length - freshCount
+          const fresh = index >= events.length - freshCount
           return (
             <div
-              key={i}
+              key={index}
               className={`flex items-baseline gap-2 rounded-md px-2 py-1 text-[12.5px] leading-snug text-parch-300 ${
                 fresh ? 'animate-fade-up bg-ink-800/70' : ''
               }`}
             >
-              <span className="tnum w-7 shrink-0 text-right text-[10px] text-parch-600">{i + 1}</span>
+              <span className="tnum w-7 shrink-0 text-right text-[10px] text-parch-600">{index + 1}</span>
               <span
                 className={`shrink-0 rounded border px-1.5 py-px text-[9px] font-semibold tracking-[0.1em] uppercase ${style.cls}`}
               >
@@ -107,4 +116,29 @@ export default function EventFeed({ events, freshCount }) {
       </div>
     </section>
   )
+}
+
+function groupTradeAttempts(events) {
+  const attempts = new Map()
+  const items = []
+
+  events.forEach((e, index) => {
+    if ((e.kind === 'offer' || e.kind === 'bid') && e.tick != null) {
+      const attempt = { order: e, result: null, index, lastIndex: index }
+      attempts.set(e.tick, attempt)
+      items.push(attempt)
+      return
+    }
+
+    if ((e.kind === 'trade' || e.kind === 'nobody_takes') && attempts.has(e.tick)) {
+      const attempt = attempts.get(e.tick)
+      attempt.result = e
+      attempt.lastIndex = index
+      return
+    }
+
+    items.push({ e, index, lastIndex: index })
+  })
+
+  return items
 }

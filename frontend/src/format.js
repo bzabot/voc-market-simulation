@@ -31,7 +31,7 @@ export function signedPct(pct) {
 export function stubbornLabel(s) {
   if (s < 0.45) return 'follows the tape'
   if (s < 0.7) return 'moderate'
-  return 'conservative'
+  return 'holds own view'
 }
 
 /** Parse "12/40" trade headers into a tick number; null otherwise. */

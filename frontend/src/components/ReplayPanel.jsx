@@ -131,7 +131,7 @@ export default function ReplayPanel({
                 </div>
                 <div className="mt-1 flex justify-between text-[10px] text-parch-600">
                   <span>follows the tape</span>
-                  <span>conservative</span>
+                  <span>holds own view</span>
                 </div>
               </div>
 
