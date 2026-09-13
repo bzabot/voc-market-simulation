@@ -49,7 +49,7 @@ def _payload(market: Market, index: int | None = None) -> dict:
 
 
 @app.post("/api/session")
-def new_session(body: NewSession | None = None) -> dict:
+async def new_session(body: NewSession | None = None) -> dict:
     global _market
     seed = body.seed if body is not None else None
     _market = Market.new(seed=seed)
@@ -57,12 +57,12 @@ def new_session(body: NewSession | None = None) -> dict:
 
 
 @app.get("/api/session")
-def get_session(index: int | None = None) -> dict:
+async def get_session(index: int | None = None) -> dict:
     return _payload(_require(), index)
 
 
 @app.post("/api/session/step")
-def step_session() -> dict:
+async def step_session() -> dict:
     market = _require()
     if market.done or not market.step():
         raise HTTPException(status_code=409, detail="done")
@@ -70,12 +70,12 @@ def step_session() -> dict:
 
 
 @app.get("/api/session/frames")
-def get_frames() -> dict:
+async def get_frames() -> dict:
     return {"frames": _require().frames}
 
 
 @app.get("/api/session/investors/{name}")
-def get_investor(name: str) -> dict:
+async def get_investor(name: str) -> dict:
     market = _require()
     try:
         inv = market.investor(name)
