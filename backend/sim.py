@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
+from math import ceil
 from typing import Iterator
 
 TOTAL_SHARES = 1000
 IPO_PRICE_CENTS = 10_000
 TRADE_TICKS = 40
-MAX_ORDER_SHARES = 10
 NAMES = [
     "Willem",
     "Anna",
@@ -61,6 +61,10 @@ def draw_stubbornness(rng: random.Random) -> float:
     return 0.2 + 0.7 * rng.random()
 
 
+def conviction(stubbornness: float) -> float:
+    return max(0.0, min(1.0, round((stubbornness - 0.2) / 0.7, 12)))
+
+
 def nudge_v(v: int, stubbornness: float, price: int) -> int:
     nxt = int(round(v + (1 - stubbornness) * TAPE_K * (price - v)))
     return max(V_MIN_CENTS, min(V_MAX_CENTS, nxt))
@@ -103,64 +107,6 @@ class Investor:
             self.start_cash_cents = self.cash_cents
         if self.v_cents is None:
             self.v_cents = reservation_cents(self.belief)
-
-
-def fill_sell_offer(
-    seller: Investor,
-    buyer_order: list[Investor],
-    size: int,
-) -> list[str]:
-    price = seller.v_cents
-    logs = [f"{seller.name} offers {size} @ {_money(price)}"]
-    remaining = size
-    for buyer in buyer_order:
-        if buyer.v_cents < price:
-            continue
-        quantity = min(remaining, buyer.cash_cents // price)
-        if quantity < 1:
-            continue
-        buyer.shares += quantity
-        seller.shares -= quantity
-        buyer.cash_cents -= price * quantity
-        seller.cash_cents += price * quantity
-        remaining -= quantity
-        logs.append(f"{buyer.name} takes {quantity} @ {_money(price)}")
-        if remaining == 0:
-            break
-    if remaining == size:
-        logs.append("nobody takes")
-    elif remaining:
-        logs.append(f"{remaining} remains unfilled")
-    return logs
-
-
-def fill_buy_offer(
-    buyer: Investor,
-    seller_order: list[Investor],
-    size: int,
-) -> list[str]:
-    price = buyer.v_cents
-    logs = [f"{buyer.name} bids {size} @ {_money(price)}"]
-    remaining = size
-    for seller in seller_order:
-        if seller.v_cents > price:
-            continue
-        quantity = min(remaining, seller.shares, buyer.cash_cents // price)
-        if quantity < 1:
-            continue
-        seller.shares -= quantity
-        buyer.shares += quantity
-        buyer.cash_cents -= price * quantity
-        seller.cash_cents += price * quantity
-        remaining -= quantity
-        logs.append(f"{seller.name} takes {quantity} @ {_money(price)}")
-        if remaining == 0:
-            break
-    if remaining == size:
-        logs.append("nobody takes")
-    elif remaining:
-        logs.append(f"{remaining} remains unfilled")
-    return logs
 
 
 @dataclass
@@ -301,46 +247,34 @@ class Market:
     def _ipo_events(self) -> Iterator[None]:
         self.phase = "ipo"
         self.header = "IPO"
-        while True:
-            order = self.investors[:]
-            self.rng.shuffle(order)
-            fills = 0
-            for inv in order:
-                if (
-                    inv.v_cents >= IPO_PRICE_CENTS
-                    and inv.cash_cents >= IPO_PRICE_CENTS
-                    and self.treasury_shares > 0
-                ):
-                    qty = min(self.treasury_shares, inv.cash_cents // IPO_PRICE_CENTS)
-                    if qty < 1:
-                        continue
-                    inv.shares += qty
-                    inv.cash_cents -= qty * IPO_PRICE_CENTS
-                    self.treasury_shares -= qty
-                    self.company_cash_cents += qty * IPO_PRICE_CENTS
-                    self.log.append(f"{inv.name} buys {qty} @ $100.00 IPO")
-                    self.events.append(
-                        {
-                            "kind": "ipo_fill",
-                            "name": inv.name,
-                            "size": qty,
-                            "price_cents": IPO_PRICE_CENTS,
-                        }
-                    )
-                    fills += 1
-                    yield
-                    if self.treasury_shares == 0:
-                        self.log.append("IPO closed")
-                        self.events.append({"kind": "ipo_closed"})
-                        self.phase = "trade"
-                        yield
-                        return
-            if fills == 0:
-                self.log.append("IPO closed")
-                self.events.append({"kind": "ipo_closed"})
-                self.phase = "trade"
-                yield
-                return
+        order = self.investors[:]
+        self.rng.shuffle(order)
+        for inv in order:
+            if inv.v_cents < IPO_PRICE_CENTS:
+                continue
+            available = min(inv.cash_cents // IPO_PRICE_CENTS, self.treasury_shares)
+            if available < 1:
+                continue
+            qty = self.rng.randint(1, available)
+            inv.shares += qty
+            inv.cash_cents -= qty * IPO_PRICE_CENTS
+            self.treasury_shares -= qty
+            self.company_cash_cents += qty * IPO_PRICE_CENTS
+            self.log.append(f"{inv.name} buys {qty} @ $100.00 IPO")
+            self.events.append(
+                {
+                    "kind": "ipo_fill",
+                    "name": inv.name,
+                    "size": qty,
+                    "price_cents": IPO_PRICE_CENTS,
+                }
+            )
+            yield
+            if self.treasury_shares == 0:
+                break
+        self.log.append("IPO closed")
+        self.events.append({"kind": "ipo_closed"})
+        yield
 
     def _voyage_events(self) -> Iterator[None]:
         self.phase = "voyage"
@@ -395,91 +329,106 @@ class Market:
             return
         if side == "sell":
             seller = self.rng.choice(el)
-            size = self.rng.randint(1, min(seller.shares, MAX_ORDER_SHARES))
+            assert seller.v_cents is not None
             price_at = seller.v_cents
+            size = max(1, ceil(seller.shares * conviction(seller.stubbornness)))
             others = [i for i in self.investors if i is not seller]
             self.rng.shuffle(others)
-            shares_before = {buyer.name: buyer.shares for buyer in others}
-            extra = fill_sell_offer(seller, others, size)
-            self.log.extend(extra)
+            buyer = next(
+                (
+                    other
+                    for other in others
+                    if other.v_cents >= price_at and other.cash_cents >= price_at
+                ),
+                None,
+            )
             self.events.append(
                 {
                     "kind": "offer",
+                    "tick": self.trade_tick,
                     "name": seller.name,
                     "size": size,
                     "price_cents": price_at,
                 }
             )
-            fills = [
-                (buyer, buyer.shares - shares_before[buyer.name])
-                for buyer in others
-                if buyer.shares > shares_before[buyer.name]
-            ]
-            for buyer, quantity in fills:
-                self.events.append(
-                    {
-                        "kind": "trade",
-                        "tick": self.trade_tick,
-                        "buyer": buyer.name,
-                        "seller": seller.name,
-                        "quantity": quantity,
-                        "price_cents": price_at,
-                    }
-                )
-            filled = sum(quantity for _, quantity in fills)
-            if filled:
-                self.last_price_cents = price_at
-                self._follow_tape(price_at)
-                if filled < size:
-                    self.events.append(
-                        {"kind": "unfilled", "side": "sell", "quantity": size - filled}
-                    )
-            else:
-                self.events.append({"kind": "nobody_takes", "side": "sell"})
+            self.log.append(f"{seller.name} offers {size} @ {_money(price_at)}")
         else:
             buyer = self.rng.choice(el)
+            assert buyer.v_cents is not None
             price_at = buyer.v_cents
-            max_n = buyer.cash_cents // price_at
-            size = self.rng.randint(1, min(max_n, MAX_ORDER_SHARES))
+            capacity = buyer.cash_cents // price_at
+            size = max(1, ceil(capacity * conviction(buyer.stubbornness)))
             others = [i for i in self.investors if i is not buyer]
             self.rng.shuffle(others)
-            shares_before = {seller.name: seller.shares for seller in others}
-            extra = fill_buy_offer(buyer, others, size)
-            self.log.extend(extra)
+            seller = next(
+                (
+                    other
+                    for other in others
+                    if other.v_cents <= price_at and other.shares >= 1
+                ),
+                None,
+            )
             self.events.append(
                 {
                     "kind": "bid",
+                    "tick": self.trade_tick,
                     "name": buyer.name,
                     "size": size,
                     "price_cents": price_at,
                 }
             )
-            fills = [
-                (seller, shares_before[seller.name] - seller.shares)
-                for seller in others
-                if seller.shares < shares_before[seller.name]
-            ]
-            for seller, quantity in fills:
-                self.events.append(
-                    {
-                        "kind": "trade",
-                        "tick": self.trade_tick,
-                        "buyer": buyer.name,
-                        "seller": seller.name,
-                        "quantity": quantity,
-                        "price_cents": price_at,
-                    }
-                )
-            filled = sum(quantity for _, quantity in fills)
-            if filled:
-                self.last_price_cents = price_at
-                self._follow_tape(price_at)
-                if filled < size:
-                    self.events.append(
-                        {"kind": "unfilled", "side": "buy", "quantity": size - filled}
-                    )
-            else:
-                self.events.append({"kind": "nobody_takes", "side": "buy"})
+            self.log.append(f"{buyer.name} bids {size} @ {_money(price_at)}")
+
+        if buyer is None or seller is None:
+            self.log.append("nobody takes")
+            self.events.append(
+                {"kind": "nobody_takes", "tick": self.trade_tick, "side": side}
+            )
+            return
+
+        assert buyer.v_cents is not None and seller.v_cents is not None
+        negotiable_max = min(size, buyer.cash_cents // price_at, seller.shares)
+        counterparty = buyer if side == "sell" else seller
+        if side == "sell":
+            advantage = max(0, buyer.v_cents - price_at) / price_at
+        else:
+            advantage = max(0, price_at - seller.v_cents) / price_at
+        counterparty_conviction = conviction(counterparty.stubbornness)
+        response_strength = counterparty_conviction + (1 - counterparty_conviction) * min(
+            1.0, advantage
+        )
+        counterproposal = max(1, ceil(negotiable_max * response_strength))
+        range_min = min(counterproposal, negotiable_max)
+        quantity = self.rng.randint(range_min, negotiable_max)
+        buyer_value = buyer.v_cents
+        seller_value = seller.v_cents
+        buyer_conviction = conviction(buyer.stubbornness)
+        seller_conviction = conviction(seller.stubbornness)
+
+        seller.shares -= quantity
+        buyer.shares += quantity
+        buyer.cash_cents -= quantity * price_at
+        seller.cash_cents += quantity * price_at
+        self.log.append(f"{buyer.name} takes {quantity} @ {_money(price_at)}")
+        self.events.append(
+            {
+                "kind": "trade",
+                "tick": self.trade_tick,
+                "buyer": buyer.name,
+                "seller": seller.name,
+                "quantity": quantity,
+                "price_cents": price_at,
+                "buyer_value_cents": buyer_value,
+                "seller_value_cents": seller_value,
+                "buyer_conviction": buyer_conviction,
+                "seller_conviction": seller_conviction,
+                "counterproposal": counterproposal,
+                "range_min": range_min,
+                "range_max": negotiable_max,
+            }
+        )
+        self.last_price_cents = price_at
+        self._follow_tape(price_at)
 
     def _follow_tape(self, price: int) -> None:
         for inv in self.investors:

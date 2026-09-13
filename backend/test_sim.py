@@ -22,62 +22,102 @@ class BeliefTests(unittest.TestCase):
 
 
 class IpoTests(unittest.TestCase):
-    def test_willing_buyer_takes_shares_and_pays_company(self):
+    def test_willing_buyer_gets_one_seeded_allocation_and_keeps_unused_cash(self):
         market = sim.Market.for_test(
             investors=[
-                sim.Investor("Anna", cash_cents=50_000_00, shares=0, belief=(0, 0, 0, 1)),
+                sim.Investor("Anna", cash_cents=50_000, shares=0, belief=(0, 0, 0, 1)),
                 sim.Investor("Willem", cash_cents=3_000_00, shares=0, belief=(1, 0, 0, 0)),
             ],
             rng=random.Random(1),
         )
-        while market.phase == "ipo":
-            market.step()
+        with patch.object(market.rng, "randint", return_value=2) as randint:
+            while market.step():
+                pass
 
         anna = market.investor("Anna")
         willem = market.investor("Willem")
-        self.assertEqual(anna.shares, 500)
-        self.assertEqual(anna.cash_cents, 0)
+        self.assertEqual(anna.shares, 2)
+        self.assertEqual(anna.cash_cents, 30_000)
         self.assertEqual(willem.shares, 0)
         self.assertEqual(willem.cash_cents, 3_000_00)
-        self.assertEqual(market.treasury_shares, 500)
-        self.assertEqual(market.company_cash_cents, 500 * 100_00)
+        self.assertEqual(market.treasury_shares, 998)
+        self.assertEqual(market.company_cash_cents, 2 * 100_00)
         self.assertEqual(market.last_price_cents, 100_00)
+        randint.assert_called_once_with(1, 5)
+
+    def test_each_willing_investor_gets_one_subscription_opportunity(self):
+        market = sim.Market.for_test(
+            investors=[
+                sim.Investor("Anna", cash_cents=30_000, shares=0, belief=(0, 0, 0, 1)),
+                sim.Investor("Maria", cash_cents=30_000, shares=0, belief=(0, 0, 0, 1)),
+            ],
+            rng=random.Random(0),
+        )
+        with patch.object(market.rng, "shuffle", return_value=None), patch.object(
+            market.rng, "randint", side_effect=[1, 2]
+        ) as randint:
+            while market.step():
+                pass
+
+        self.assertEqual([investor.shares for investor in market.investors], [1, 2])
+        self.assertEqual(randint.call_args_list, [unittest.mock.call(1, 3), unittest.mock.call(1, 3)])
 
     def test_unwilling_investor_does_not_buy_at_ipo(self):
         market = sim.Market.for_test(
             investors=[
                 sim.Investor("Willem", cash_cents=60_000_00, shares=0, belief=(1, 0, 0, 0)),
+                sim.Investor("Anna", cash_cents=9_999, shares=0, belief=(0, 0, 0, 1)),
             ],
             rng=random.Random(0),
         )
         market.step()
         self.assertEqual(market.investor("Willem").shares, 0)
+        self.assertEqual(market.investor("Anna").shares, 0)
         self.assertEqual(market.treasury_shares, 1000)
         self.assertIn("IPO closed", market.log[-1])
 
 
 class TradeTests(unittest.TestCase):
-    def test_sell_offer_fills_when_buyer_values_higher(self):
-        seller = sim.Investor("Pieter", cash_cents=0, shares=20, belief=(1, 0, 0, 0))
-        buyer = sim.Investor("Anna", cash_cents=50_000_00, shares=0, belief=(0, 0, 0, 1))
-        logs = sim.fill_sell_offer(
-            seller,
-            buyer_order=[buyer],
-            size=10,
+    def market(self, investors, side):
+        market = sim.Market.for_test(
+            investors=investors,
+            rng=random.Random(0),
+            treasury_shares=0,
+            phase="trade",
         )
-        self.assertEqual(seller.shares, 10)
-        self.assertEqual(buyer.shares, 10)
-        self.assertEqual(buyer.cash_cents, 50_000_00 - 10 * seller.v_cents)
-        self.assertEqual(seller.cash_cents, 10 * seller.v_cents)
-        self.assertEqual(logs[-1], f"Anna takes 10 @ ${seller.v_cents / 100:.2f}")
+        market.trade_tick = 7
+        return market, patch.object(
+            market.rng, "random", return_value=0.0 if side == "sell" else 1.0
+        )
 
-    def test_sell_offer_rejected_when_buyer_values_lower(self):
-        seller = sim.Investor("Anna", cash_cents=0, shares=20, belief=(0, 0, 0, 1))
-        buyer = sim.Investor("Pieter", cash_cents=50_000_00, shares=0, belief=(1, 0, 0, 0))
-        logs = sim.fill_sell_offer(seller, buyer_order=[buyer], size=5)
-        self.assertEqual(seller.shares, 20)
-        self.assertEqual(buyer.shares, 0)
-        self.assertEqual(logs[-1], "nobody takes")
+    def test_conviction_clamps_and_scales_stubbornness(self):
+        self.assertEqual(sim.conviction(0.0), 0.0)
+        self.assertAlmostEqual(sim.conviction(0.55), 0.5)
+        self.assertEqual(sim.conviction(1.0), 1.0)
+
+    def test_opening_sell_quantity_uses_capacity_and_conviction_over_ten(self):
+        seller = sim.Investor("Pieter", 0, 31, (1, 0, 0, 0), stubbornness=0.55)
+        buyer = sim.Investor("Anna", 100_000, 0, (0, 0, 0, 1))
+        market, choose_sell = self.market([seller, buyer], "sell")
+        with choose_sell, patch.object(market.rng, "shuffle", return_value=None), patch.object(
+            market.rng, "randint", return_value=16
+        ):
+            market._one_trade()
+        self.assertEqual(market.events[0], {
+            "kind": "offer", "tick": 7, "name": "Pieter", "size": 16, "price_cents": 2_000
+        })
+
+    def test_opening_buy_quantity_uses_affordable_capacity_and_conviction(self):
+        buyer = sim.Investor("Anna", 61_000, 0, (1, 0, 0, 0), stubbornness=0.55)
+        seller = sim.Investor("Pieter", 0, 40, (1, 0, 0, 0))
+        market, choose_buy = self.market([buyer, seller], "buy")
+        with choose_buy, patch.object(market.rng, "shuffle", return_value=None), patch.object(
+            market.rng, "randint", return_value=15
+        ):
+            market._one_trade()
+        self.assertEqual(market.events[0], {
+            "kind": "bid", "tick": 7, "name": "Anna", "size": 15, "price_cents": 2_000
+        })
 
     def test_failed_sell_offer_identifies_missing_buyer(self):
         market = sim.Market.for_test(
@@ -87,7 +127,8 @@ class TradeTests(unittest.TestCase):
             phase="trade",
         )
         market._one_trade()
-        self.assertEqual(market.events[-1], {"kind": "nobody_takes", "side": "sell"})
+        self.assertEqual(market.events[-1], {"kind": "nobody_takes", "tick": 0, "side": "sell"})
+        self.assertEqual(market.events[0]["tick"], 0)
 
     def test_failed_buy_bid_identifies_missing_seller(self):
         market = sim.Market.for_test(
@@ -97,134 +138,75 @@ class TradeTests(unittest.TestCase):
             phase="trade",
         )
         market._one_trade()
-        self.assertEqual(market.events[-1], {"kind": "nobody_takes", "side": "buy"})
+        self.assertEqual(market.events[-1], {"kind": "nobody_takes", "tick": 0, "side": "buy"})
+        self.assertEqual(market.events[0]["tick"], 0)
 
-    def test_sell_offer_records_normalized_trade(self):
-        seller = sim.Investor("Pieter", cash_cents=0, shares=10, belief=(1, 0, 0, 0))
-        buyer = sim.Investor("Anna", cash_cents=50_000_00, shares=0, belief=(0, 0, 0, 1))
-        market = sim.Market.for_test(
-            investors=[seller, buyer],
-            rng=random.Random(1),
-            treasury_shares=0,
-            phase="trade",
-        )
-        market.trade_tick = 7
-
-        market._one_trade()
-
-        event = market.events[-1]
-        self.assertEqual(event["kind"], "trade")
-        self.assertEqual(event["tick"], 7)
-        self.assertEqual(event["buyer"], "Anna")
-        self.assertEqual(event["seller"], "Pieter")
-        self.assertEqual(event["quantity"], buyer.shares)
-        self.assertGreater(event["quantity"], 0)
-        self.assertEqual(event["price_cents"], 2_000)
-
-    def test_buy_bid_records_normalized_trade(self):
-        seller = sim.Investor("Pieter", cash_cents=0, shares=10, belief=(1, 0, 0, 0))
-        buyer = sim.Investor("Anna", cash_cents=18_000, shares=0, belief=(0, 0, 0, 1))
-        market = sim.Market.for_test(
-            investors=[seller, buyer],
-            rng=random.Random(0),
-            treasury_shares=0,
-            phase="trade",
-        )
-        market.trade_tick = 9
-
-        market._one_trade()
-
-        event = market.events[-1]
-        self.assertEqual(event["kind"], "trade")
-        self.assertEqual(event["tick"], 9)
-        self.assertEqual(event["buyer"], "Anna")
-        self.assertEqual(event["seller"], "Pieter")
-        self.assertGreater(event["quantity"], 0)
-        self.assertEqual(event["price_cents"], 18_000)
-
-    def test_sell_offer_partially_fills_across_buyers(self):
-        seller = sim.Investor("Pieter", cash_cents=0, shares=10, belief=(1, 0, 0, 0))
-        anna = sim.Investor("Anna", cash_cents=3 * 2_000, shares=0, belief=(0, 0, 0, 1))
-        maria = sim.Investor("Maria", cash_cents=4 * 2_000, shares=0, belief=(0, 0, 0, 1))
-
-        sim.fill_sell_offer(seller, buyer_order=[anna, maria], size=10)
-
-        self.assertEqual(seller.shares, 3)
-        self.assertEqual(anna.shares, 3)
-        self.assertEqual(maria.shares, 4)
-        self.assertEqual(anna.cash_cents, 0)
-        self.assertEqual(maria.cash_cents, 0)
-
-    def test_partial_order_records_each_fill_and_unfilled_remainder(self):
-        seller = sim.Investor("Pieter", cash_cents=0, shares=50, belief=(1, 0, 0, 0))
-        anna = sim.Investor("Anna", cash_cents=3 * 2_000, shares=0, belief=(0, 0, 0, 1))
-        maria = sim.Investor("Maria", cash_cents=4 * 2_000, shares=0, belief=(0, 0, 0, 1))
-        market = sim.Market.for_test(
-            investors=[seller, anna, maria],
-            rng=random.Random(1),
-            treasury_shares=0,
-            phase="trade",
-        )
-        market.trade_tick = 11
-
-        with patch.object(market.rng, "randint", return_value=10):
+    def test_equal_values_trade_and_preserve_pre_tape_negotiation_facts(self):
+        seller = sim.Investor("Pieter", 0, 20, (0.25, 0.25, 0.25, 0.25), stubbornness=0.55)
+        buyer = sim.Investor("Anna", 200_000, 0, (0.25, 0.25, 0.25, 0.25), stubbornness=0.27)
+        market, choose_sell = self.market([seller, buyer], "sell")
+        with choose_sell, patch.object(market.rng, "shuffle", return_value=None), patch.object(
+            market.rng, "randint", return_value=8
+        ):
             market._one_trade()
 
-        offer = market.events[0]
-        trades = [event for event in market.events if event["kind"] == "trade"]
-        unfilled = market.events[-1]
-        self.assertEqual({event["buyer"] for event in trades}, {"Anna", "Maria"})
-        self.assertTrue(all(event["seller"] == "Pieter" for event in trades))
-        self.assertTrue(all(event["tick"] == 11 for event in trades))
-        self.assertEqual(sum(event["quantity"] for event in trades), 7)
-        self.assertEqual(
-            unfilled,
-            {
-                "kind": "unfilled",
-                "side": "sell",
-                "quantity": offer["size"] - 7,
-            },
-        )
+        trade = market.events[-1]
+        self.assertEqual(trade["quantity"], 8)
+        self.assertEqual(trade["buyer_value_cents"], 10_000)
+        self.assertEqual(trade["seller_value_cents"], 10_000)
+        self.assertAlmostEqual(trade["buyer_conviction"], 0.1)
+        self.assertAlmostEqual(trade["seller_conviction"], 0.5)
+        self.assertEqual(trade["counterproposal"], 1)
+        self.assertEqual((trade["range_min"], trade["range_max"]), (1, 10))
+        self.assertLessEqual(trade["range_min"], trade["quantity"])
+        self.assertLessEqual(trade["quantity"], trade["range_max"])
+        self.assertEqual([e["kind"] for e in sim.investor_tape(market.events, "Anna")], ["trade"])
+        self.assertEqual([e["kind"] for e in sim.investor_tape(market.events, "Pieter")], ["offer", "trade"])
 
-    def test_buy_bid_partially_fills_across_sellers(self):
-        buyer = sim.Investor("Anna", cash_cents=10 * 18_000, shares=0, belief=(0, 0, 0, 1))
-        pieter = sim.Investor("Pieter", cash_cents=0, shares=3, belief=(1, 0, 0, 0))
-        maria = sim.Investor("Maria", cash_cents=0, shares=4, belief=(1, 0, 0, 0))
+    def test_trade_records_values_before_following_tape(self):
+        seller = sim.Investor("Pieter", 0, 20, (0.25, 0.25, 0.25, 0.25), stubbornness=0.55)
+        buyer = sim.Investor("Anna", 200_000, 0, (1, 0, 0, 0), stubbornness=0.27, v_cents=12_500)
+        market, choose_sell = self.market([seller, buyer], "sell")
+        with choose_sell, patch.object(market.rng, "shuffle", return_value=None), patch.object(
+            market.rng, "randint", side_effect=lambda low, high: low
+        ):
+            market._one_trade()
+        self.assertEqual(market.events[-1]["buyer_value_cents"], 12_500)
+        self.assertNotEqual(buyer.v_cents, 12_500)
 
-        sim.fill_buy_offer(buyer, seller_order=[pieter, maria], size=10)
+    def test_favorable_advantage_raises_counterproposal(self):
+        def counterproposal(buyer_value):
+            seller = sim.Investor("Pieter", 0, 20, (0.25, 0.25, 0.25, 0.25), stubbornness=0.55)
+            buyer = sim.Investor("Anna", 400_000, 0, (1, 0, 0, 0), stubbornness=0.27, v_cents=buyer_value)
+            market, choose_sell = self.market([seller, buyer], "sell")
+            with choose_sell, patch.object(market.rng, "shuffle", return_value=None), patch.object(
+                market.rng, "randint", side_effect=lambda low, high: low
+            ):
+                market._one_trade()
+            return market.events[-1]["counterproposal"]
 
-        self.assertEqual(buyer.shares, 7)
-        self.assertEqual(pieter.shares, 0)
-        self.assertEqual(maria.shares, 0)
-        self.assertEqual(buyer.cash_cents, 3 * 18_000)
+        self.assertGreater(counterproposal(15_000), counterproposal(10_000))
 
-    def test_sell_orders_are_capped_at_maximum_size(self):
-        seller = sim.Investor("Pieter", cash_cents=0, shares=1_000, belief=(1, 0, 0, 0))
-        buyer = sim.Investor("Anna", cash_cents=50_000_00, shares=0, belief=(0, 0, 0, 1))
-        market = sim.Market.for_test(
-            investors=[seller, buyer],
-            rng=random.Random(1),
-            treasury_shares=0,
-            phase="trade",
-        )
+    def test_first_compatible_counterparty_alone_trades_and_conserves_assets(self):
+        seller = sim.Investor("Pieter", 0, 20, (1, 0, 0, 0), stubbornness=0.9)
+        first = sim.Investor("Anna", 6_000, 0, (0, 0, 0, 1), stubbornness=0.9)
+        second = sim.Investor("Maria", 100_000, 0, (0, 0, 0, 1), stubbornness=0.9)
+        market, choose_sell = self.market([seller, first, second], "sell")
+        cash_before = sum(i.cash_cents for i in market.investors)
+        shares_before = sum(i.shares for i in market.investors)
+        with choose_sell, patch.object(market.rng, "shuffle", return_value=None), patch.object(
+            market.rng, "randint", side_effect=lambda low, high: high
+        ):
+            market._one_trade()
 
-        market._one_trade()
-
-        self.assertLessEqual(market.events[0]["size"], 10)
-
-    def test_buy_orders_are_capped_at_maximum_size(self):
-        seller = sim.Investor("Pieter", cash_cents=0, shares=1_000, belief=(1, 0, 0, 0))
-        buyer = sim.Investor("Anna", cash_cents=50_000_00, shares=0, belief=(0, 0, 0, 1))
-        market = sim.Market.for_test(
-            investors=[seller, buyer],
-            rng=random.Random(0),
-            treasury_shares=0,
-            phase="trade",
-        )
-
-        market._one_trade()
-
-        self.assertLessEqual(market.events[0]["size"], 10)
+        trades = [e for e in market.events if e["kind"] == "trade"]
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]["buyer"], "Anna")
+        self.assertEqual(first.shares, 3)
+        self.assertEqual(second.shares, 0)
+        self.assertEqual(sum(i.cash_cents for i in market.investors), cash_before)
+        self.assertEqual(sum(i.shares for i in market.investors), shares_before)
+        self.assertNotIn("unfilled", [e["kind"] for e in market.events])
 
 
 class LogTailTests(unittest.TestCase):
@@ -264,8 +246,12 @@ class TapeTests(unittest.TestCase):
     def test_failed_offer_does_not_change_v(self):
         seller = sim.Investor("Anna", cash_cents=0, shares=20, belief=(0, 0, 0, 1))
         buyer = sim.Investor("Pieter", cash_cents=50_000_00, shares=0, belief=(1, 0, 0, 0))
+        market = sim.Market.for_test(
+            investors=[seller, buyer], rng=random.Random(1), treasury_shares=0, phase="trade"
+        )
         v0, v1 = seller.v_cents, buyer.v_cents
-        sim.fill_sell_offer(seller, buyer_order=[buyer], size=5)
+        with patch.object(market.rng, "random", return_value=0.0):
+            market._one_trade()
         self.assertEqual(seller.v_cents, v0)
         self.assertEqual(buyer.v_cents, v1)
 
@@ -308,6 +294,23 @@ class PnlTests(unittest.TestCase):
 
 
 class SnapshotTests(unittest.TestCase):
+    def test_ipo_close_snapshot_precedes_first_trade_snapshot(self):
+        market = sim.Market(
+            rng=random.Random(0),
+            investors=[sim.Investor("Willem", 0, 0, (1, 0, 0, 0))],
+        )
+
+        market.step()
+        ipo_close = market.frames[-1]
+        market.step()
+        first_trade = market.frames[-1]
+
+        self.assertEqual(ipo_close["phase"], "ipo")
+        self.assertEqual(ipo_close["header"], "IPO")
+        self.assertEqual(ipo_close["events"][-1]["kind"], "ipo_closed")
+        self.assertEqual(first_trade["phase"], "trade")
+        self.assertEqual(first_trade["header"], "1/40")
+
     def test_step_records_independent_frame(self):
         market = sim.Market.for_test(
             investors=[
@@ -369,13 +372,17 @@ class SnapshotTests(unittest.TestCase):
         ev = market.events[0]
         self.assertEqual(ev["kind"], "ipo_fill")
         self.assertEqual(ev["name"], "Anna")
-        self.assertEqual(ev["size"], 500)
+        self.assertEqual(ev["size"], market.investor("Anna").shares)
+        self.assertIn(ev["size"], range(1, 501))
 
     def test_new_accepts_seed(self):
         a = sim.Market.new(seed=42)
         b = sim.Market.new(seed=42)
-        self.assertEqual([i.name for i in a.investors], [i.name for i in b.investors])
-        self.assertEqual(a.hidden_outcome, b.hidden_outcome)
+        while a.step():
+            pass
+        while b.step():
+            pass
+        self.assertEqual(a.snapshot(), b.snapshot())
 
 
 class TapeTestsFilter(unittest.TestCase):
