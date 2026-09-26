@@ -85,9 +85,9 @@ export default function Board({ frame, newEvents }) {
               <span className="flex items-center gap-2 max-lg:hidden">
                 <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-ink-700">
                   <span
-                    className="block h-full rounded-full transition-[width] duration-500 ease-out"
+                    className="block h-full w-full origin-left rounded-full transition-transform duration-500 ease-out"
                     style={{
-                      width: `${(inv.shares / maxShares) * 100}%`,
+                      transform: `scaleX(${inv.shares / maxShares})`,
                       backgroundColor: investorColor(inv.name),
                     }}
                   />
@@ -129,8 +129,8 @@ export default function Board({ frame, newEvents }) {
           <span className="flex items-center gap-2 max-lg:hidden">
             <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-ink-700">
               <span
-                className="block h-full rounded-full bg-parch-600 transition-[width] duration-500 ease-out"
-                style={{ width: `${(frame.treasury_shares / TOTAL_SHARES) * 100}%` }}
+                className="block h-full w-full origin-left rounded-full bg-parch-600 transition-transform duration-500 ease-out"
+                style={{ transform: `scaleX(${frame.treasury_shares / TOTAL_SHARES})` }}
               />
             </span>
             <span className="tnum w-10 text-right text-[11px] text-parch-400">

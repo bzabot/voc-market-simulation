@@ -69,7 +69,13 @@ export default function TradeAttempt({ order, result, number, fresh }) {
             )}
           </span>
         </span>
-        <span aria-hidden className="shrink-0 text-parch-600">{expanded ? '\u25b4' : '\u25be'}</span>
+        <svg
+          viewBox="0 0 10 6"
+          aria-hidden
+          className={`mt-1 h-1.5 w-2.5 shrink-0 fill-current text-parch-600 transition-transform duration-200 ease-out ${expanded ? 'rotate-180' : ''}`}
+        >
+          <path d="M0 0l5 6 5-6H0z" />
+        </svg>
       </button>
 
       {expanded && (

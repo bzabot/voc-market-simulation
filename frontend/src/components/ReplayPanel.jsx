@@ -215,7 +215,7 @@ function InvestorSelect({ names, value, onChange }) {
       </Select.Trigger>
       <Select.Portal>
         <Select.Positioner className="z-50" sideOffset={6}>
-          <Select.Popup className="min-w-40 rounded-lg border border-ink-600 bg-ink-900 p-1 shadow-[0_16px_40px_-12px_rgb(0_0_0/0.8)]">
+          <Select.Popup className="min-w-40 origin-(--transform-origin) rounded-lg border border-ink-600 bg-ink-900 p-1 shadow-[0_16px_40px_-12px_rgb(0_0_0/0.8)] transition-[opacity,scale] duration-150 ease-out data-starting-style:scale-[0.97] data-starting-style:opacity-0 data-ending-style:scale-[0.97] data-ending-style:opacity-0">
             {names.map((n) => (
               <Select.Item
                 key={n}

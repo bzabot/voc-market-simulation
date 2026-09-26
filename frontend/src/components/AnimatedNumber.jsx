@@ -12,13 +12,20 @@ export default function AnimatedNumber({ value, format, duration = 350, classNam
   useEffect(() => {
     const from = fromRef.current
     if (from === value) return
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      fromRef.current = value
+      rafRef.current = requestAnimationFrame(() => setDisplay(value))
+      return () => cancelAnimationFrame(rafRef.current)
+    }
     const start = performance.now()
     const tick = (now) => {
       const t = Math.min(1, (now - start) / duration)
       const eased = 1 - Math.pow(1 - t, 3)
-      setDisplay(Math.round(from + (value - from) * eased))
+      // track the live value so a mid-tween retarget glides from here
+      const current = Math.round(from + (value - from) * eased)
+      fromRef.current = current
+      setDisplay(current)
       if (t < 1) rafRef.current = requestAnimationFrame(tick)
-      else fromRef.current = value
     }
     rafRef.current = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(rafRef.current)

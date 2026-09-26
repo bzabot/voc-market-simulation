@@ -134,13 +134,47 @@ body {
 
 /* Buttons */
 .btn {
-  @apply inline-flex cursor-pointer items-center gap-2 rounded-lg border border-ink-600 bg-ink-800 px-3.5 py-2 text-[13px] font-medium text-parch-200 transition-all duration-150 hover:border-gold-600/60 hover:bg-ink-700 hover:text-parch-100 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-ink-600 disabled:hover:bg-ink-800;
+  @apply inline-flex cursor-pointer items-center gap-2 rounded-lg border border-ink-600 bg-ink-800 px-3.5 py-2 text-[13px] font-medium text-parch-200 transition-[transform,color,background-color,border-color] duration-150 ease-out active:scale-[0.96] focus-visible:outline-2 focus-visible:outline-gold-500 disabled:cursor-not-allowed disabled:opacity-40 disabled:active:scale-100;
 }
 .btn-primary {
-  @apply border-gold-600/70 bg-gold-500/15 text-gold-300 hover:border-gold-500 hover:bg-gold-500/25 hover:text-gold-300;
+  @apply border-gold-600/70 bg-gold-500/15 text-gold-300;
 }
 .btn-danger {
-  @apply border-voc-500/60 bg-voc-500/10 text-voc-400 hover:border-voc-400 hover:bg-voc-500/20 hover:text-voc-400;
+  @apply border-voc-500/60 bg-voc-500/10 text-voc-400;
+}
+
+/* Hover states only where hover is real (not sticky touch taps) */
+@media (hover: hover) and (pointer: fine) {
+  .btn:hover {
+    @apply border-gold-600/60 bg-ink-700 text-parch-100;
+  }
+  .btn-primary:hover {
+    @apply border-gold-500 bg-gold-500/25 text-gold-300;
+  }
+  .btn-danger:hover {
+    @apply border-voc-400 bg-voc-500/20 text-voc-400;
+  }
+  .btn:disabled:hover {
+    @apply border-ink-600 bg-ink-800 text-parch-200;
+  }
+  .btn-primary:disabled:hover {
+    @apply border-gold-600/70 bg-gold-500/15 text-gold-300;
+  }
+  .btn-danger:disabled:hover {
+    @apply border-voc-500/60 bg-voc-500/10 text-voc-400;
+  }
+}
+
+/* Reduced motion: keep opacity/color cues, drop movement */
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-up,
+  .animate-pop-in {
+    animation-name: fade-in;
+  }
+  .animate-pulse-dot,
+  .animate-shimmer {
+    animation: none;
+  }
 }
 
 kbd {

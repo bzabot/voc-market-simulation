@@ -72,7 +72,10 @@ export default function EventFeed({ events, freshCount }) {
   }, [events.length])
 
   return (
-    <section className="panel flex max-h-[28rem] min-h-0 flex-col self-start p-4 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)]">
+    <section
+      className="panel animate-fade-up flex max-h-[28rem] min-h-0 flex-col self-start p-4 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)]"
+      style={{ animationDelay: '120ms' }}
+    >
       <div className="mb-3 flex items-baseline justify-between">
         <h2 className="panel-title">Market ticker</h2>
         <span className="text-[11px] text-parch-600">{events.length} events</span>

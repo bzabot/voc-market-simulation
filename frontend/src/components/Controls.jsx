@@ -17,15 +17,23 @@ export default function Controls({
         <kbd>space</kbd>
       </button>
       <button type="button" className="btn" onClick={onToggleAuto} disabled={(done && !auto) || viewingHistory}>
-        {auto ? (
-          <>
-            <PauseGlyph /> Pause
-          </>
-        ) : (
-          <>
-            <PlayGlyph /> Auto
-          </>
-        )}
+        <span className="relative h-2.5 w-2.5" aria-hidden>
+          <PlayGlyph
+            className={
+              auto
+                ? 'scale-[0.25] opacity-0 blur-[4px]'
+                : 'scale-100 opacity-100 blur-[0px]'
+            }
+          />
+          <PauseGlyph
+            className={
+              auto
+                ? 'scale-100 opacity-100 blur-[0px]'
+                : 'scale-[0.25] opacity-0 blur-[4px]'
+            }
+          />
+        </span>
+        {auto ? 'Pause' : 'Auto'}
         <kbd>A</kbd>
       </button>
       <button type="button" className="btn" onClick={onPrevious} disabled={!canGoPrevious}>
@@ -47,17 +55,20 @@ export default function Controls({
   )
 }
 
-function PlayGlyph() {
+const ICON_SWAP =
+  'absolute inset-0 transition-[opacity,scale,filter] duration-200 [transition-timing-function:cubic-bezier(0.2,0,0,1)]'
+
+function PlayGlyph({ className = '' }) {
   return (
-    <svg viewBox="0 0 12 12" className="h-2.5 w-2.5 fill-current" aria-hidden>
+    <svg viewBox="0 0 12 12" className={`h-2.5 w-2.5 fill-current ${ICON_SWAP} ${className}`} aria-hidden>
       <path d="M2 1l9 5-9 5V1z" />
     </svg>
   )
 }
 
-function PauseGlyph() {
+function PauseGlyph({ className = '' }) {
   return (
-    <svg viewBox="0 0 12 12" className="h-2.5 w-2.5 fill-current" aria-hidden>
+    <svg viewBox="0 0 12 12" className={`h-2.5 w-2.5 fill-current ${ICON_SWAP} ${className}`} aria-hidden>
       <path d="M2 1h3v10H2zM7 1h3v10H7z" />
     </svg>
   )

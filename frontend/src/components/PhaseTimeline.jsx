@@ -23,13 +23,19 @@ export default function PhaseTimeline({ frame }) {
 
         <div className="relative h-1 flex-1 overflow-visible rounded-full bg-ink-700">
           <div
-            className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-gold-600 via-gold-500 to-sea-400 transition-[width] duration-500 ease-out"
-            style={{ width: `${progress * 100}%` }}
+            className="absolute inset-y-0 left-0 w-full origin-left rounded-full bg-gradient-to-r from-gold-600 via-gold-500 to-sea-400 transition-transform duration-500 ease-out"
+            style={{ transform: `scaleX(${progress})` }}
           />
-          <ShipIcon
-            className="absolute h-5 w-7 -translate-x-1/2 text-parch-200 transition-[left] duration-500 ease-out"
-            style={{ left: `${progress * 100}%`, top: '-14px' }}
-          />
+          {/* full-width proxy so the ship moves with a composited transform, not `left` */}
+          <div
+            className="pointer-events-none absolute inset-y-0 left-0 w-full transition-transform duration-500 ease-out"
+            style={{ transform: `translateX(${progress * 100}%)` }}
+          >
+            <ShipIcon
+              className="absolute h-5 w-7 -translate-x-1/2 text-parch-200"
+              style={{ left: 0, top: '-14px' }}
+            />
+          </div>
         </div>
 
         <PhaseNode
