@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { getFrames, getInvestor, newSession, stepSession } from './api'
+import { useCallback, useEffect, useState } from 'react'
+import { inspectInvestor, marketNew } from './sim.js'
 import Board from './components/Board'
 import Controls from './components/Controls'
 import EventFeed from './components/EventFeed'
@@ -11,6 +11,7 @@ import ReplayPanel from './components/ReplayPanel'
 const AUTO_MS = 400
 
 export default function App() {
+  const [market, setMarket] = useState(() => marketNew())
   const [history, setHistory] = useState([])
   const [done, setDone] = useState(false)
   const [auto, setAuto] = useState(false)
@@ -18,7 +19,8 @@ export default function App() {
   const [viewIndex, setViewIndex] = useState(0)
   const [historyIndex, setHistoryIndex] = useState(null)
   const [selectedName, setSelectedName] = useState(null)
-  const [inspect, setInspect] = useState(null)
+  const inspect =
+    replaying && selectedName ? inspectInvestor(market, selectedName) : null
 
   const liveFrame = history.length ? history[history.length - 1] : null
   const viewingHistory = !replaying && historyIndex != null
@@ -29,37 +31,32 @@ export default function App() {
   const prevEventCount = prevFrame?.events.length ?? 0
   const newEvents = frame ? frame.events.slice(prevEventCount) : []
 
-  const enterReplay = useCallback(async () => {
+  const enterReplay = useCallback(() => {
+    const frames = market.frames
     setAuto(false)
-    const data = await getFrames()
-    setHistory(data.frames)
-    setViewIndex(data.frames.length - 1)
+    setHistory(frames)
+    setViewIndex(frames.length - 1)
     setHistoryIndex(null)
     setDone(true)
     setReplaying(true)
-    const leaders = [...data.frames[data.frames.length - 1].investors].sort(
+    const leaders = [...frames[frames.length - 1].investors].sort(
       (a, b) => b.cash_cents - (b.start_cash_cents || 0) - (a.cash_cents - (a.start_cash_cents || 0)),
     )
     setSelectedName((name) => name ?? leaders[0]?.name ?? null)
-  }, [])
+  }, [market])
 
-  const applyStep = useCallback(
-    async (body) => {
-      if (body.frame) setHistory((h) => [...h, body.frame])
-      if (body.done) await enterReplay()
-    },
-    [enterReplay],
-  )
-
-  const stepOnce = useCallback(async () => {
-    try {
-      await applyStep(await stepSession())
-    } catch (err) {
-      if (err.status === 409) await enterReplay()
+  const stepOnce = useCallback(() => {
+    const ok = market.step()
+    if (!ok) {
+      enterReplay()
+      return
     }
-  }, [applyStep, enterReplay])
+    const frame = market.frames.at(-1)
+    if (market.done) enterReplay()
+    else setHistory((h) => [...h, frame])
+  }, [enterReplay, market])
 
-  const newRun = useCallback(async () => {
+  const newRun = useCallback(() => {
     setAuto(false)
     setDone(false)
     setReplaying(false)
@@ -67,8 +64,7 @@ export default function App() {
     setViewIndex(0)
     setHistoryIndex(null)
     setSelectedName(null)
-    setInspect(null)
-    await newSession()
+    setMarket(marketNew())
   }, [])
 
   const showPrevious = useCallback(() => {
@@ -82,37 +78,12 @@ export default function App() {
 
   const showLive = useCallback(() => setHistoryIndex(null), [])
 
-  // auto-play
-  const stepRef = useRef(stepOnce)
-  stepRef.current = stepOnce
   useEffect(() => {
     if (!auto) return
-    const timer = setInterval(() => stepRef.current(), AUTO_MS)
+    const timer = setInterval(() => stepOnce(), AUTO_MS)
     return () => clearInterval(timer)
-  }, [auto])
+  }, [auto, stepOnce])
 
-  // start a run on load
-  const startedRef = useRef(false)
-  useEffect(() => {
-    if (startedRef.current) return
-    startedRef.current = true
-    newRun()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  // fetch investor inspection when the replay inspector changes target
-  useEffect(() => {
-    if (!replaying || !selectedName) return
-    let stale = false
-    getInvestor(selectedName).then((body) => {
-      if (!stale) setInspect(body)
-    })
-    return () => {
-      stale = true
-    }
-  }, [replaying, selectedName])
-
-  // keyboard shortcuts (mirrors the original app)
   useEffect(() => {
     const onKey = (ev) => {
       if (ev.target.matches('input, select, textarea')) return
@@ -124,7 +95,7 @@ export default function App() {
       } else if ((ev.key === ' ' || ev.key === 'Enter') && !viewingHistory) {
         ev.preventDefault()
         setAuto(false)
-        stepRef.current()
+        stepOnce()
       } else if ((ev.key === 'a' || ev.key === 'A') && !viewingHistory) {
         setAuto((a) => !a)
       } else if (ev.key === 's' || ev.key === 'S') {
@@ -133,7 +104,7 @@ export default function App() {
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [replaying, showLive, showPrevious, viewingHistory])
+  }, [replaying, showLive, showPrevious, stepOnce, viewingHistory])
 
   return (
     <div className="flex min-h-screen flex-col">

@@ -1,14 +1,19 @@
-export const TOTAL_SHARES = 1000
-export const IPO_PRICE_CENTS = 10_000
-export const V_MIN_CENTS = 2_000
-export const V_MAX_CENTS = 18_000
-export const TRADE_TICKS = 40
+import {
+  IPO_PRICE_CENTS,
+  OUTCOMES_CENTS_PER_SHARE,
+  TOTAL_SHARES,
+  TRADE_TICKS,
+  V_MAX_CENTS,
+  V_MIN_CENTS,
+} from './sim.js'
+
+export { IPO_PRICE_CENTS, TOTAL_SHARES, TRADE_TICKS, V_MAX_CENTS, V_MIN_CENTS }
 
 export const OUTCOMES = [
-  { key: 'lost', cents: 2_000, label: 'Ship lost' },
-  { key: 'poor', cents: 7_000, label: 'Poor expedition' },
-  { key: 'normal', cents: 13_000, label: 'Normal expedition' },
-  { key: 'excellent', cents: 18_000, label: 'Excellent expedition' },
+  { key: 'lost', cents: OUTCOMES_CENTS_PER_SHARE.lost, label: 'Ship lost' },
+  { key: 'poor', cents: OUTCOMES_CENTS_PER_SHARE.poor, label: 'Poor expedition' },
+  { key: 'normal', cents: OUTCOMES_CENTS_PER_SHARE.normal, label: 'Normal expedition' },
+  { key: 'excellent', cents: OUTCOMES_CENTS_PER_SHARE.excellent, label: 'Excellent expedition' },
 ]
 
 export function money(cents) {
@@ -34,7 +39,6 @@ export function stubbornLabel(s) {
   return 'holds own view'
 }
 
-/** Parse "12/40" trade headers into a tick number; null otherwise. */
 export function tradeTick(header) {
   const m = /^(\d+)\/(\d+)$/.exec(header ?? '')
   return m ? Number(m[1]) : null
