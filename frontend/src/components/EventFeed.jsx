@@ -1,12 +1,15 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useId, useRef, useState } from 'react'
 import { investorColor } from '../colors'
 import { money, signedMoney } from '../format'
 import { kindStyle } from './kindStyle'
 import { gatheringReason } from './gatheringCopy'
 
+const SeatCtx = createContext(null)
+
 function Name({ children }) {
+  const seats = useContext(SeatCtx)
   return (
-    <span className="font-semibold" style={{ color: investorColor(children) }}>
+    <span className="font-semibold" style={{ color: investorColor(seats?.[children] ?? children) }}>
       {children}
     </span>
   )
@@ -170,7 +173,7 @@ export function EventRow({ e, index, fresh, viewer }) {
   )
 }
 
-export default function EventFeed({ events, freshCount, viewer }) {
+export default function EventFeed({ events, freshCount, viewer, seatByName }) {
   const scrollRef = useRef(null)
 
   useEffect(() => {
@@ -179,26 +182,28 @@ export default function EventFeed({ events, freshCount, viewer }) {
   }, [events.length])
 
   return (
-    <section className="panel animate-fade-up self-start lg:sticky lg:top-4">
-      <div className="mb-3 flex items-baseline justify-between">
-        <h2 className="panel-title">Market ticker</h2>
-        <span className="text-mute">{events.length} events</span>
-      </div>
+    <SeatCtx.Provider value={seatByName ?? null}>
+      <section className="panel animate-fade-up self-start lg:sticky lg:top-4">
+        <div className="mb-3 flex items-baseline justify-between">
+          <h2 className="panel-title">Market ticker</h2>
+          <span className="text-mute">{events.length} events</span>
+        </div>
 
-      <div ref={scrollRef} className="max-h-[24rem] space-y-1 overflow-y-auto lg:max-h-[calc(100dvh-12rem)]">
-        {events.length === 0 && (
-          <p className="sentence py-8 text-center text-mute">(waiting for the opening bell)</p>
-        )}
-        {events.map((e, index) => (
-          <EventRow
-            key={index}
-            e={e}
-            index={index}
-            fresh={index >= events.length - freshCount}
-            viewer={viewer}
-          />
-        ))}
-      </div>
-    </section>
+        <div ref={scrollRef} className="max-h-[24rem] space-y-1 overflow-y-auto lg:max-h-[calc(100dvh-12rem)]">
+          {events.length === 0 && (
+            <p className="sentence py-8 text-center text-mute">(waiting for the opening bell)</p>
+          )}
+          {events.map((e, index) => (
+            <EventRow
+              key={index}
+              e={e}
+              index={index}
+              fresh={index >= events.length - freshCount}
+              viewer={viewer}
+            />
+          ))}
+        </div>
+      </section>
+    </SeatCtx.Provider>
   )
 }

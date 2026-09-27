@@ -79,7 +79,7 @@ export default function BeliefChart({ history, upto }) {
     .map(([px, py], i) => `${i === 0 ? 'M' : 'L'}${px.toFixed(1)},${py.toFixed(1)}`)
     .join(' ')
 
-  const names = tradeFrames[0]?.investors.map((inv) => inv.name) ?? []
+  const names = tradeFrames[0]?.investors.filter((inv) => !inv.is_human).map((inv) => inv.name) ?? []
   const figure = { fontSize: 13, fontVariantNumeric: 'tabular-nums lining-nums' }
   const last = tradeFrames[tradeFrames.length - 1]
   const guides = [

@@ -7,12 +7,14 @@ import EventFeed from './components/EventFeed'
 import Floor from './components/Floor'
 import Masthead from './components/Masthead'
 import PhaseTimeline from './components/PhaseTimeline'
+import PlayerDock from './components/PlayerDock'
+import PlayerSetup from './components/PlayerSetup'
 import ReplayPanel from './components/ReplayPanel'
 
 const AUTO_MS = 400
 
 export default function App() {
-  const [market, setMarket] = useState(() => marketNew())
+  const [market, setMarket] = useState(null)
   const [history, setHistory] = useState([])
   const [done, setDone] = useState(false)
   const [auto, setAuto] = useState(false)
@@ -20,6 +22,8 @@ export default function App() {
   const [viewIndex, setViewIndex] = useState(0)
   const [historyIndex, setHistoryIndex] = useState(null)
   const [selectedName, setSelectedName] = useState(null)
+  const [pending, setPending] = useState(null)
+  const [ipoResolved, setIpoResolved] = useState(null)
   const inspect =
     replaying && selectedName ? inspectInvestor(market, selectedName) : null
 
@@ -46,16 +50,28 @@ export default function App() {
     setSelectedName((name) => name ?? leaders[0]?.name ?? null)
   }, [market])
 
-  const stepOnce = useCallback(() => {
-    const ok = market.step()
+  const applyStep = useCallback((act) => {
+    if (!market) return
+    const wasHumanIpo = market.peek().kind === 'human_ipo'
+    const ok = market.step(act)
+    setPending(null)
+    if (wasHumanIpo) setIpoResolved(act.type === 'ipo_subscribe' ? 'subscribed' : 'passed')
     if (!ok) {
       enterReplay()
       return
     }
-    const frame = market.frames.at(-1)
+    const next = market.frames.at(-1)
     if (market.done) enterReplay()
-    else setHistory((h) => [...h, frame])
+    else setHistory((h) => [...h, next])
   }, [enterReplay, market])
+
+  const stepManual = useCallback((action) => {
+    applyStep(action ?? { type: 'skip' })
+  }, [applyStep])
+
+  const stepSpectator = useCallback(() => {
+    applyStep({ type: 'none' })
+  }, [applyStep])
 
   const newRun = useCallback(() => {
     setAuto(false)
@@ -65,7 +81,9 @@ export default function App() {
     setViewIndex(0)
     setHistoryIndex(null)
     setSelectedName(null)
-    setMarket(marketNew())
+    setPending(null)
+    setIpoResolved(null)
+    setMarket(null)
   }, [])
 
   const showPrevious = useCallback(() => {
@@ -91,13 +109,13 @@ export default function App() {
 
   useEffect(() => {
     if (!auto) return
-    const timer = setInterval(() => stepOnce(), AUTO_MS)
+    const timer = setInterval(() => stepSpectator(), AUTO_MS)
     return () => clearInterval(timer)
-  }, [auto, stepOnce])
+  }, [auto, stepSpectator])
 
   useEffect(() => {
     const onKey = (ev) => {
-      if (ev.target.matches('input, select, textarea')) return
+      if (!market || ev.target.matches('input, select, textarea')) return
       if (ev.key === 'ArrowLeft' && !replaying) {
         ev.preventDefault()
         showPrevious()
@@ -106,7 +124,7 @@ export default function App() {
       } else if ((ev.key === ' ' || ev.key === 'Enter') && !viewingHistory) {
         ev.preventDefault()
         setAuto(false)
-        stepOnce()
+        stepManual(pending)
       } else if ((ev.key === 'a' || ev.key === 'A') && !viewingHistory) {
         setAuto((a) => !a)
       } else if (ev.key === 's' || ev.key === 'S') {
@@ -115,7 +133,21 @@ export default function App() {
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [replaying, showLive, showPrevious, stepOnce, viewingHistory])
+  }, [market, pending, replaying, showLive, showPrevious, stepManual, viewingHistory])
+
+  if (!market) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center p-5">
+        <PlayerSetup onStart={(player) => setMarket(marketNew({ human: player }))} />
+      </div>
+    )
+  }
+
+  const peek = replaying || viewingHistory ? null : market.peek()
+  const human = frame?.investors.find((inv) => inv.is_human) ?? market.human()
+  const seatByName = Object.fromEntries(
+    (frame?.investors ?? market.investors).map((inv) => [inv.name, inv.seat ?? inv.name]),
+  )
 
   return (
     <div className="flex min-h-dvh flex-col">
@@ -134,7 +166,7 @@ export default function App() {
         historyPosition={viewingHistory ? `${historyIndex + 1} / ${history.length}` : null}
         onStep={() => {
           setAuto(false)
-          stepOnce()
+          stepManual(pending)
         }}
         onToggleAuto={() => setAuto((a) => !a)}
         onPrevious={showPrevious}
@@ -148,10 +180,27 @@ export default function App() {
             history={history}
             upto={shownIndex == null ? history.length : shownIndex + 1}
           />
-          <Floor gathering={newEvents.findLast((e) => e.kind === 'gathering') ?? null} />
+          <Floor
+            gathering={newEvents.findLast((e) => e.kind === 'gathering') ?? null}
+            seatByName={seatByName}
+          />
+          <PlayerDock
+            auto={auto}
+            peek={peek}
+            human={human}
+            treasury={market.treasury_shares}
+            pending={pending}
+            onPending={setPending}
+            onStep={stepManual}
+            ipoResolved={ipoResolved}
+          />
           <Board frame={frame} newEvents={newEvents} />
         </div>
-        <EventFeed events={frame?.events ?? []} freshCount={replaying || viewingHistory ? 0 : newEvents.length} />
+        <EventFeed
+          events={frame?.events ?? []}
+          freshCount={replaying || viewingHistory ? 0 : newEvents.length}
+          seatByName={seatByName}
+        />
       </main>
 
       {replaying && history.length > 0 && (

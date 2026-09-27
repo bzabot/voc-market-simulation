@@ -66,7 +66,7 @@ export default function Board({ frame, newEvents }) {
               <span className="flex min-w-0 items-center gap-2">
                 <span
                   className="size-2 shrink-0 rounded-full"
-                  style={{ backgroundColor: investorColor(inv.name) }}
+                  style={{ backgroundColor: investorColor(inv.seat ?? inv.name) }}
                 />
                 <span className="truncate font-medium text-text">{inv.name}</span>
                 <span className="text-mute max-lg:hidden">
@@ -81,7 +81,7 @@ export default function Board({ frame, newEvents }) {
               />
 
               <AnimatedNumber
-                value={worthCents(inv)}
+                value={inv.is_human ? inv.cash_cents + inv.shares * price : worthCents(inv)}
                 format={money}
                 className="text-right text-text"
               />
@@ -92,7 +92,7 @@ export default function Board({ frame, newEvents }) {
                     className="phase-move block h-full w-full origin-left rounded-full"
                     style={{
                       transform: `scaleX(${inv.shares / maxShares})`,
-                      backgroundColor: investorColor(inv.name),
+                      backgroundColor: investorColor(inv.seat ?? inv.name),
                     }}
                   />
                 </span>
@@ -102,11 +102,15 @@ export default function Board({ frame, newEvents }) {
               </span>
 
               <span className="text-right">
-                <AnimatedNumber
-                  value={inv.v_cents ?? 0}
-                  format={money}
-                  className="text-text"
-                />
+                {inv.is_human ? (
+                  <span className="text-mute">&mdash;</span>
+                ) : (
+                  <AnimatedNumber
+                    value={inv.v_cents ?? 0}
+                    format={money}
+                    className="text-text"
+                  />
+                )}
                 <span className={`ml-1 text-[12px] ${STANCE_CLASS[stance]}`}>{STANCE_LABEL[stance]}</span>
               </span>
             </li>

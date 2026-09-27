@@ -3,15 +3,15 @@ import { investorColor } from '../colors'
 import { money } from '../format'
 import { gatheringReason } from './gatheringCopy'
 
-function Name({ children }) {
+function Name({ children, seat }) {
   return (
-    <span className="font-semibold" style={{ color: investorColor(children) }}>
+    <span className="font-semibold" style={{ color: investorColor(seat ?? children) }}>
       {children}
     </span>
   )
 }
 
-function Stack({ title, names }) {
+function Stack({ title, names, seatByName }) {
   return (
     <div>
       <div className="kicker mb-1 text-mute">{title}</div>
@@ -21,7 +21,7 @@ function Stack({ title, names }) {
         <ul className="space-y-1">
           {names.map((name) => (
             <li key={name}>
-              <Name>{name}</Name>
+              <Name seat={seatByName?.[name]}>{name}</Name>
             </li>
           ))}
         </ul>
@@ -30,7 +30,7 @@ function Stack({ title, names }) {
   )
 }
 
-export default function Floor({ gathering }) {
+export default function Floor({ gathering, seatByName }) {
   const buyers = gathering?.crowd.filter((p) => p.stance === 'buying').map((p) => p.name) ?? []
   const sellers = gathering?.crowd.filter((p) => p.stance === 'selling').map((p) => p.name) ?? []
   const dropped = gathering?.trigger
@@ -74,8 +74,8 @@ export default function Floor({ gathering }) {
           </p>
           <p className="sentence mt-1 mb-4 text-dim">{gatheringReason(gathering)}</p>
           <div className="grid grid-cols-2 gap-4">
-            <Stack title="Buying" names={buyers} />
-            <Stack title="Selling" names={sellers} />
+            <Stack title="Buying" names={buyers} seatByName={seatByName} />
+            <Stack title="Selling" names={sellers} seatByName={seatByName} />
           </div>
           {dim && <p className="mt-3 text-mute">{dim}</p>}
           <ul className="mt-4 space-y-1">
@@ -84,7 +84,8 @@ export default function Floor({ gathering }) {
             ) : (
               gathering.trades.map((trade) => (
                 <li key={`${trade.buyer}-${trade.seller}`}>
-                  <Name>{trade.buyer}</Name> buys {trade.quantity} from <Name>{trade.seller}</Name> @{' '}
+                  <Name seat={seatByName?.[trade.buyer]}>{trade.buyer}</Name> buys {trade.quantity} from{' '}
+                  <Name seat={seatByName?.[trade.seller]}>{trade.seller}</Name> @{' '}
                   {money(trade.price_cents)}
                 </li>
               ))
