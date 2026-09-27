@@ -1,20 +1,8 @@
 import { useEffect, useRef } from 'react'
 import { investorColor } from '../colors'
 import { money } from '../format'
+import { KIND_STYLE } from './kindStyle'
 import TradeAttempt from './TradeAttempt'
-
-export const KIND_STYLE = {
-  ipo_fill: { label: 'IPO', cls: 'border-gold-600/50 bg-gold-500/10 text-gold-300' },
-  ipo_closed: { label: 'IPO', cls: 'border-ink-600 bg-ink-800 text-parch-400' },
-  offer: { label: 'Offer', cls: 'border-loss-500/50 bg-loss-500/10 text-loss-300' },
-  bid: { label: 'Bid', cls: 'border-sea-500/50 bg-sea-500/10 text-sea-300' },
-  trade: { label: 'Trade', cls: 'border-gain-500/50 bg-gain-500/10 text-gain-300' },
-  nobody_takes: { label: 'Miss', cls: 'border-ink-600 bg-ink-800 text-parch-500' },
-  no_eligible: { label: 'Miss', cls: 'border-ink-600 bg-ink-800 text-parch-500' },
-  voyage: { label: 'Voyage', cls: 'border-voc-500/60 bg-voc-500/10 text-voc-400' },
-  payout: { label: 'Payout', cls: 'border-gold-600/50 bg-gold-500/10 text-gold-300' },
-  treasury_payout: { label: 'Payout', cls: 'border-gold-600/50 bg-gold-500/10 text-gold-300' },
-}
 
 function Name({ children }) {
   return (
@@ -25,7 +13,7 @@ function Name({ children }) {
 }
 
 function Money({ cents }) {
-  return <span className="tnum font-semibold text-parch-100">{money(cents)}</span>
+  return <span className="tnum font-semibold text-text">{money(cents)}</span>
 }
 
 export function EventBody({ e }) {
@@ -52,7 +40,7 @@ export function EventBody({ e }) {
     case 'no_eligible':
       return <>No eligible trader</>
     case 'voyage':
-      return <>The voyage returns: <span className="font-semibold capitalize">{e.name}</span> (<Money cents={e.price_cents} />/share)</>
+      return <>The voyage returns: <span className="font-semibold text-voyage capitalize">{e.name}</span> (<Money cents={e.price_cents} />/share)</>
     case 'payout':
       return <><Name>{e.name}</Name> receives {e.size} shares &rarr; <Money cents={e.price_cents} /></>
     case 'treasury_payout':
@@ -62,7 +50,6 @@ export function EventBody({ e }) {
   }
 }
 
-/** The market ticker: every event of the run, newest at the bottom. */
 export default function EventFeed({ events, freshCount }) {
   const scrollRef = useRef(null)
 
@@ -72,18 +59,15 @@ export default function EventFeed({ events, freshCount }) {
   }, [events.length])
 
   return (
-    <section
-      className="panel animate-fade-up flex max-h-[28rem] min-h-0 flex-col self-start p-4 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)]"
-      style={{ animationDelay: '120ms' }}
-    >
+    <section className="panel animate-fade-up self-start lg:sticky lg:top-4">
       <div className="mb-3 flex items-baseline justify-between">
         <h2 className="panel-title">Market ticker</h2>
-        <span className="text-[11px] text-parch-600">{events.length} events</span>
+        <span className="text-mute">{events.length} events</span>
       </div>
 
-      <div ref={scrollRef} className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
+      <div ref={scrollRef} className="max-h-[24rem] space-y-1 overflow-y-auto lg:max-h-[calc(100dvh-12rem)]">
         {events.length === 0 && (
-          <p className="py-8 text-center text-sm text-parch-600">(waiting for the opening bell)</p>
+          <p className="sentence py-8 text-center text-mute">(waiting for the opening bell)</p>
         )}
         {groupTradeAttempts(events).map(({ e, order, result, index, lastIndex }) => {
           if (order) {
@@ -102,14 +86,12 @@ export default function EventFeed({ events, freshCount }) {
           return (
             <div
               key={index}
-              className={`flex items-baseline gap-2 rounded-md px-2 py-1 text-[12.5px] leading-snug text-parch-300 ${
-                fresh ? 'animate-fade-up bg-ink-800/70' : ''
+              className={`flex items-baseline gap-2 rounded-lg px-2 py-1 text-dim ${
+                fresh ? 'bg-raised/70' : ''
               }`}
             >
-              <span className="tnum w-7 shrink-0 text-right text-[10px] text-parch-600">{index + 1}</span>
-              <span
-                className={`shrink-0 rounded border px-1.5 py-px text-[9px] font-semibold tracking-[0.1em] uppercase ${style.cls}`}
-              >
+              <span className="tnum w-7 shrink-0 text-right text-mute">{index + 1}</span>
+              <span className={`kicker shrink-0 rounded border px-1.5 py-px ${style.cls}`}>
                 {style.label}
               </span>
               <span className="min-w-0"><EventBody e={e} /></span>

@@ -29,25 +29,25 @@ export default function TradeAttempt({ order, result, number, fresh }) {
 
   return (
     <div
-      className={`rounded-md border px-2 py-2 text-[12.5px] leading-snug ${
+      className={`rounded-lg border px-2 py-2 ${
         success
-          ? 'border-gain-500/40 bg-gain-500/10 text-parch-200'
-          : 'border-ink-700 bg-ink-900/50 text-parch-500'
-      } ${fresh ? 'animate-fade-up' : ''}`}
+          ? 'border-gain/40 bg-gain/10 text-dim'
+          : 'border-line bg-surface/50 text-mute'
+      } ${fresh ? 'bg-raised/40' : ''}`}
     >
       <button
         type="button"
         aria-expanded={expanded}
         aria-controls={detailsId}
         onClick={() => setExpanded((open) => !open)}
-        className="flex w-full cursor-pointer items-start gap-2 text-left focus-visible:outline-2 focus-visible:outline-gold-500"
+        className="flex w-full cursor-pointer items-start gap-2 text-left focus-visible:outline-2 focus-visible:outline-accent"
       >
-        <span className="tnum w-7 shrink-0 pt-px text-right text-[10px] text-parch-600">{number}</span>
+        <span className="tnum w-7 shrink-0 pt-px text-right text-mute">{number}</span>
         <span
-          className={`mt-px shrink-0 rounded border px-1.5 py-px text-[9px] font-semibold tracking-[0.1em] uppercase ${
+          className={`kicker mt-px shrink-0 rounded border px-1.5 py-px ${
             success
-              ? 'border-gain-500/50 bg-gain-500/10 text-gain-300'
-              : 'border-ink-600 bg-ink-800 text-parch-500'
+              ? 'border-gain/50 bg-gain/10 text-gain'
+              : 'border-line bg-raised text-mute'
           }`}
         >
           {success ? 'Trade' : 'Miss'}
@@ -57,7 +57,7 @@ export default function TradeAttempt({ order, result, number, fresh }) {
             Turn {order.tick} &middot; <Name>{order.name}</Name>{' '}
             {sell ? 'offered' : 'bid for'} {order.size} shares at {money(order.price_cents)}
           </span>
-          <span className={`block ${success ? 'font-semibold text-gain-300' : 'text-parch-600'}`}>
+          <span className={`block ${success ? 'font-semibold text-gain' : 'text-mute'}`}>
             {success ? (
               <>
                 <Name>{result.buyer}</Name> bought {result.quantity} shares &middot; {expired} expired
@@ -72,35 +72,35 @@ export default function TradeAttempt({ order, result, number, fresh }) {
         <svg
           viewBox="0 0 10 6"
           aria-hidden
-          className={`mt-1 h-1.5 w-2.5 shrink-0 fill-current text-parch-600 transition-transform duration-200 ease-out ${expanded ? 'rotate-180' : ''}`}
+          className={`mt-1 size-2.5 shrink-0 fill-current text-mute transition-transform duration-200 ease-out ${expanded ? 'rotate-180' : ''}`}
         >
           <path d="M0 0l5 6 5-6H0z" />
         </svg>
       </button>
 
       {expanded && (
-        <div id={detailsId} className="mt-3 ml-9 space-y-2 border-t border-ink-700/80 pt-3 text-parch-400">
+        <div id={detailsId} className="mt-3 ml-9 space-y-2 border-t border-line/80 pt-3 text-dim">
           {success ? (
             <>
               <p>
                 <Name>{initiator}</Name> valued each share at {money(initiatorValue)} &middot; conviction{' '}
                 {conviction(initiatorConviction)}
-                <span className="block pl-3 text-parch-500">
+                <span className="block pl-3 text-mute">
                   Initial proposal: {sell ? 'sell' : 'buy'} {order.size} shares
                 </span>
               </p>
               <p>
                 <Name>{counterparty}</Name> valued each share at {money(counterpartyValue)} &middot; conviction{' '}
                 {conviction(counterpartyConviction)}
-                <span className="block pl-3 text-parch-500">
+                <span className="block pl-3 text-mute">
                   Counterproposal: {sell ? 'buy' : 'sell'} {result.counterproposal} shares
                 </span>
               </p>
-              <p className="font-semibold text-gain-300">
+              <p className="font-semibold text-gain">
                 Agreement: <Name>{result.buyer}</Name> bought {result.quantity} shares from{' '}
                 <Name>{result.seller}</Name> at {money(result.price_cents)} each
               </p>
-              {expired > 0 && <p className="text-parch-500">{expired} shares expired.</p>}
+              {expired > 0 && <p className="text-mute">{expired} shares expired.</p>}
             </>
           ) : (
             <p>{sell ? 'No buyer accepted the offer.' : 'No seller accepted the bid.'}</p>

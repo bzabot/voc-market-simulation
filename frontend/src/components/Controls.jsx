@@ -42,21 +42,20 @@ export default function Controls({
       </button>
       <button type="button" className="btn" onClick={onLive} disabled={!viewingHistory}>
         Live
-        {historyPosition && <span className="tnum text-[10px] text-parch-500">{historyPosition}</span>}
+        {historyPosition && <span className="tnum text-mute">{historyPosition}</span>}
       </button>
       <button type="button" className="btn btn-danger" onClick={onNewRun}>
         New run
       </button>
 
-      <p className="ml-auto hidden text-[11px] text-parch-600 lg:block">
+      <p className="ml-auto hidden text-mute lg:block">
         <kbd>space</kbd> step &middot; <kbd>A</kbd> auto &middot; <kbd>&larr;</kbd> previous &middot; <kbd>L</kbd> live
       </p>
     </div>
   )
 }
 
-const ICON_SWAP =
-  'absolute inset-0 transition-[opacity,scale,filter] duration-200 [transition-timing-function:cubic-bezier(0.2,0,0,1)]'
+const ICON_SWAP = 'icon-swap'
 
 function PlayGlyph({ className = '' }) {
   return (

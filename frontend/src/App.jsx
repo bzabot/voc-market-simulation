@@ -78,6 +78,16 @@ export default function App() {
 
   const showLive = useCallback(() => setHistoryIndex(null), [])
 
+  const scrubTo = useCallback((index) => {
+    setAuto(false)
+    if (replaying) {
+      setViewIndex(index)
+      return
+    }
+    if (index >= history.length - 1) setHistoryIndex(null)
+    else setHistoryIndex(index)
+  }, [history.length, replaying])
+
   useEffect(() => {
     if (!auto) return
     const timer = setInterval(() => stepOnce(), AUTO_MS)
@@ -107,14 +117,14 @@ export default function App() {
   }, [replaying, showLive, showPrevious, stepOnce, viewingHistory])
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex min-h-dvh flex-col">
       <Masthead
         frame={frame}
         prevFrame={prevFrame}
         replaying={replaying}
         viewingHistory={viewingHistory}
       />
-      <PhaseTimeline frame={frame} />
+      <PhaseTimeline frame={frame} frames={history} onScrub={scrubTo} />
       <Controls
         auto={auto}
         done={done}
@@ -147,10 +157,6 @@ export default function App() {
         <div className="px-5 pb-6">
           <ReplayPanel
             finalFrame={history[history.length - 1]}
-            frameCount={history.length}
-            viewIndex={viewIndex}
-            viewHeader={frame?.header ?? ''}
-            onScrub={setViewIndex}
             selectedName={selectedName}
             onSelectInvestor={setSelectedName}
             inspect={inspect}

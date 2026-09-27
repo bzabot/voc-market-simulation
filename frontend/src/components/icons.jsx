@@ -1,14 +1,13 @@
-/** VOC chamber monogram badge. */
 export function VocMark({ className, ...rest }) {
   return (
     <svg viewBox="0 0 64 64" className={className} aria-hidden {...rest}>
-      <rect x="2" y="2" width="60" height="60" rx="12" fill="none" stroke="currentColor" strokeWidth="2.5" />
+      <rect x="2" y="2" width="60" height="60" rx="12" fill="none" stroke="currentColor" strokeWidth="2" />
       <text
         x="32"
         y="42"
         textAnchor="middle"
-        fontFamily="Fraunces, Georgia, serif"
-        fontWeight="900"
+        fontFamily="Public Sans, sans-serif"
+        fontWeight="600"
         fontSize="24"
         fill="currentColor"
       >
@@ -41,7 +40,7 @@ export function ShipIcon({ className, ...rest }) {
 
 export function AnchorIcon({ className, ...rest }) {
   return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden {...rest}>
+      <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden {...rest}>
       <circle cx="12" cy="5" r="2.5" />
       <path d="M12 7.5V21M12 21c-4.5 0-7.5-3-8-6.5M12 21c4.5 0 7.5-3 8-6.5M8.5 10.5h7" />
     </svg>

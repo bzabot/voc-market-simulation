@@ -1,11 +1,12 @@
 import AnimatedNumber from './AnimatedNumber'
 import { VocMark } from './icons'
 import { money, TOTAL_SHARES } from '../format'
+import { useOnScreen } from '../useOnScreen'
 
 const PHASE_STYLE = {
-  ipo: 'border-gold-600/60 bg-gold-500/10 text-gold-300',
-  trade: 'border-sea-500/60 bg-sea-500/10 text-sea-300',
-  voyage: 'border-voc-500/60 bg-voc-500/10 text-voc-400',
+  ipo: 'border-line bg-raised text-dim',
+  trade: 'border-sea/60 bg-sea/10 text-sea',
+  voyage: 'border-voyage/60 bg-voyage/10 text-voyage',
 }
 
 const PHASE_LABEL = { ipo: 'Initial Offering', trade: 'Open Trading', voyage: 'The Voyage' }
@@ -16,24 +17,19 @@ export default function Masthead({ frame, prevFrame, replaying, viewingHistory }
   const delta = price != null && prev != null ? price - prev : 0
   const voyage = frame?.voyage_shown
   const phase = frame?.phase ?? 'ipo'
+  const [setSea, seaOn] = useOnScreen()
 
   return (
-    <header className="flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-ink-700 bg-ink-900/60 px-5 py-3 backdrop-blur">
+    <header className="flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-line bg-surface/60 px-5 py-3 backdrop-blur">
       <div className="flex items-center gap-3">
-        <VocMark className="h-10 w-10 text-gold-500" />
+        <VocMark className="size-10 text-accent" />
         <div className="leading-tight">
-          <h1 className="font-display text-lg font-bold tracking-wide text-parch-100">
-            Vereenigde Oostindische Compagnie
-          </h1>
-          <p className="text-[11px] tracking-[0.22em] text-parch-500 uppercase">
-            Amsterdam &middot; Anno 1602
-          </p>
+          <h1 className="title text-text">Vereenigde Oostindische Compagnie</h1>
+          <p className="kicker text-mute">Amsterdam &middot; Anno 1602</p>
         </div>
       </div>
 
-      <span
-        className={`rounded-full border px-3 py-1 text-[11px] font-semibold tracking-[0.14em] uppercase ${PHASE_STYLE[phase]}`}
-      >
+      <span className={`kicker rounded-full border px-3 py-1 ${PHASE_STYLE[phase]}`}>
         {PHASE_LABEL[phase]}
         {frame && phase === 'trade' ? ` \u00b7 ${frame.header}` : ''}
       </span>
@@ -44,15 +40,9 @@ export default function Masthead({ frame, prevFrame, replaying, viewingHistory }
             <Placeholder />
           ) : (
             <span className="flex items-baseline gap-2">
-              <AnimatedNumber
-                value={price}
-                format={money}
-                className="text-xl font-semibold text-gold-300"
-              />
+              <AnimatedNumber value={price} format={money} className="figure text-accent" />
               {delta !== 0 && (
-                <span
-                  className={`text-xs font-semibold ${delta > 0 ? 'text-gain-400' : 'text-loss-400'}`}
-                >
+                <span className={`text-[13px] font-medium ${delta > 0 ? 'text-gain' : 'text-loss'}`}>
                   {delta > 0 ? '\u25b2' : '\u25bc'} {money(Math.abs(delta))}
                 </span>
               )}
@@ -67,29 +57,32 @@ export default function Masthead({ frame, prevFrame, replaying, viewingHistory }
             <AnimatedNumber
               value={price * TOTAL_SHARES}
               format={money}
-              className="text-xl font-semibold text-parch-100"
+              className="figure text-text"
             />
           )}
         </Stat>
 
         <Stat label="Voyage">
           {voyage ? (
-            <span className="text-sm font-semibold text-voc-400 capitalize">{voyage}</span>
+            <span className="text-[13px] font-medium text-voyage capitalize">{voyage}</span>
           ) : (
-            <span className="flex items-center gap-1.5 text-sm text-sea-300">
-              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-sea-400" />
+            <span className="flex items-center gap-1.5 text-[13px] text-sea">
+              <span
+                ref={setSea}
+                className={`pulse-dot inline-block size-1.5 rounded-full bg-sea ${seaOn ? 'is-on' : ''}`}
+              />
               at sea
             </span>
           )}
         </Stat>
 
         {replaying && (
-          <span className="rounded-full border border-parch-600/50 bg-parch-500/10 px-3 py-1 text-[11px] font-semibold tracking-[0.14em] text-parch-300 uppercase">
+          <span className="kicker rounded-full border border-line bg-raised px-3 py-1 text-dim">
             Replay
           </span>
         )}
         {viewingHistory && (
-          <span className="rounded-full border border-parch-600/50 bg-parch-500/10 px-3 py-1 text-[11px] font-semibold tracking-[0.14em] text-parch-300 uppercase">
+          <span className="kicker rounded-full border border-line bg-raised px-3 py-1 text-dim">
             History
           </span>
         )}
@@ -101,12 +94,12 @@ export default function Masthead({ frame, prevFrame, replaying, viewingHistory }
 function Stat({ label, children }) {
   return (
     <div className="leading-tight">
-      <div className="mb-0.5 text-[10px] tracking-[0.18em] text-parch-500 uppercase">{label}</div>
+      <div className="kicker mb-0.5 text-mute">{label}</div>
       {children}
     </div>
   )
 }
 
 function Placeholder() {
-  return <span className="text-xl text-parch-600">&mdash;</span>
+  return <span className="figure text-mute">&mdash;</span>
 }
