@@ -2,7 +2,7 @@ The goal of this project is to implement a simple market simulation. As visual a
 The goal is to implement what happening in Netherlands, the first stock market with Dutch East India Company, the VOC.
 
 - We will use AI only where it is necessary. There is an OPEN_AI_API_KEY with 4$ of credits in the current folder.
-- We will not use AI and prefer random (py random values) to simulate the real world randomness.
+- We will not use AI; the simulation uses a seeded generator in `frontend/src/sim.js` for randomness.
 
 Scenario:
 
@@ -33,26 +33,23 @@ Uncertainty
 
 Layout:
 
-- `backend/` — FastAPI + simulation engine (Python, uv)
-- `frontend/` — React + Tailwind + Base UI (Vite)
+- `frontend/` — React + Tailwind + Base UI (Vite), including the market simulation in `frontend/src/sim.js`
+- `specs/` — market rules and product notes
 
 Run:
 
-- Terminal: `cd backend && uv run python main.py` (`--auto` to start in AUTO)
-- Browser: `cd backend && uv run uvicorn web:app --reload` then open http://127.0.0.1:8000/
+```text
+cd frontend && npm install && npm run dev
+```
 
-Headless runs (dump results to JSON for auditing):
+Static build (output in `frontend/dist`):
 
-- `cd backend && uv run python run.py` — one run with a random seed
-- `uv run python run.py --count 10` — several runs in one go
-- `uv run python run.py --seed 42` — reproduce a specific run
-- `uv run python run.py --out mydir` — custom output directory (default: `backend/runs/`)
+```text
+cd frontend && npm run build && npm run preview
+```
 
-Each run writes `runs/run-<timestamp>-seed<n>.json` with the seed, hidden voyage
-outcome, price ticker, full event stream and log, and per-investor P&L. The seed
-is always recorded, so any suspicious run can be replayed exactly with `--seed`.
+Market-rule tests:
 
-Frontend:
-
-- Build (served by FastAPI from `backend/static/`): `cd frontend && npm install && npm run build`
-- Dev server with hot reload (API proxied to :8000): `cd frontend && npm run dev`
+```text
+cd frontend && npm test
+```
