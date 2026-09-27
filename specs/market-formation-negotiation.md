@@ -1,5 +1,7 @@
 # Market formation and negotiated trade quantities
 
+Secondary trades now follow `specs/gathering-turn.md`. The IPO subscription below still applies. The shout, the negotiated quantity, and `TradeAttempt` do not.
+
 ## Purpose
 
 Improve secondary-market formation without forcing trades or adding concepts that the current application does not need. The simulation should remain a small teaching model with a historical basis.

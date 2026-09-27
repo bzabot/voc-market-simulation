@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { inspectInvestor, marketNew } from './sim.js'
+import BeliefChart from './components/BeliefChart'
 import Board from './components/Board'
 import Controls from './components/Controls'
 import EventFeed from './components/EventFeed'
+import Floor from './components/Floor'
 import Masthead from './components/Masthead'
 import PhaseTimeline from './components/PhaseTimeline'
-import PriceChart from './components/PriceChart'
 import ReplayPanel from './components/ReplayPanel'
 
 const AUTO_MS = 400
@@ -143,11 +144,11 @@ export default function App() {
 
       <main className="grid flex-1 items-start gap-4 px-5 pb-4 lg:grid-cols-[minmax(0,1fr)_24rem]">
         <div className="min-w-0 space-y-4">
-          <PriceChart
+          <BeliefChart
             history={history}
             upto={shownIndex == null ? history.length : shownIndex + 1}
-            frame={frame}
           />
+          <Floor gathering={newEvents.findLast((e) => e.kind === 'gathering') ?? null} />
           <Board frame={frame} newEvents={newEvents} />
         </div>
         <EventFeed events={frame?.events ?? []} freshCount={replaying || viewingHistory ? 0 : newEvents.length} />

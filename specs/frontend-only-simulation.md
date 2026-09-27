@@ -24,7 +24,7 @@ Update the README layout and run sections so they describe this frontend-only ap
 
 ## Engine
 
-`sim.js` keeps the current market. One company, 1000 shares, an IPO at $100, 40 trade ticks, then the voyage payoff. Same investor names, cash ladder, outcomes, beliefs, stubbornness, conviction, tape nudge, IPO subscription, and negotiated trade quantities described in `specs/market-formation-negotiation.md`.
+`sim.js` keeps the current market. One company, 1000 shares, an IPO at $100, 40 trade ticks, then the voyage payoff. Same investor names, cash ladder, outcomes, beliefs, stubbornness, tape nudge, and IPO subscription. Each trade turn is a gathering, described in `specs/gathering-turn.md`.
 
 Snapshots keep the fields the page already reads.
 

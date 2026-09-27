@@ -18,6 +18,7 @@ export const PAYOFF_DOLLARS = [20, 70, 130, 180];
 export const V_MIN_CENTS = 2_000;
 export const V_MAX_CENTS = 18_000;
 export const TAPE_K = 0.15;
+export const DRIFT_CENTS = 800;
 
 export function pyRound(value, ndigits = 0) {
   if (ndigits !== 0) {
@@ -75,9 +76,33 @@ export function drawStubbornness(rng) {
   return 0.2 + 0.7 * rng.random();
 }
 
-export function conviction(stubbornness) {
-  const raw = pyRound((stubbornness - 0.2) / 0.7, 12);
-  return Math.max(0, Math.min(1, raw));
+export function morningStep(v, stubbornness, up) {
+  const step = pyRound((1 - stubbornness) * DRIFT_CENTS, 0);
+  const clamp = (cents) => Math.max(V_MIN_CENTS, Math.min(V_MAX_CENTS, cents));
+  if (step === 0) return clamp(v);
+  return clamp(v + (up ? step : -step));
+}
+
+export function medianBeliefCents(investors) {
+  if (investors.length === 0) return IPO_PRICE_CENTS;
+  const values = investors.map((inv) => inv.v_cents).sort((a, b) => a - b);
+  const mid = Math.floor(values.length / 2);
+  if (values.length % 2 === 1) return values[mid];
+  return pyRound((values[mid - 1] + values[mid]) / 2, 0);
+}
+
+export function openPlaqueCents(lastSaleCents, investors) {
+  return pyRound(0.5 * lastSaleCents + 0.5 * medianBeliefCents(investors), 0);
+}
+
+export function worthCents(investor) {
+  return investor.cash_cents + investor.shares * investor.v_cents;
+}
+
+export function stanceAt(investor, price) {
+  if (investor.v_cents > price && investor.cash_cents >= price) return "buying";
+  if (investor.v_cents < price && investor.shares >= 1) return "selling";
+  return "waiting";
 }
 
 export function nudgeV(v, stubbornness, price) {
@@ -85,8 +110,137 @@ export function nudgeV(v, stubbornness, price) {
   return Math.max(V_MIN_CENTS, Math.min(V_MAX_CENTS, nxt));
 }
 
+export function missPull(v, stubbornness, price) {
+  const step = pyRound((1 - stubbornness) * DRIFT_CENTS, 0);
+  const clamp = (cents) => Math.max(V_MIN_CENTS, Math.min(V_MAX_CENTS, cents));
+  if (step === 0 || v === price) return clamp(v);
+  const gap = Math.abs(price - v);
+  const mag = Math.max(step, gap);
+  const dir = v < price ? 1 : -1;
+  return clamp(v + dir * mag);
+}
+
 function money(cents) {
   return `$${(cents / 100).toFixed(2)}`;
+}
+
+function crowdAt(investors, price) {
+  const buyers = [];
+  const sellers = [];
+  for (const inv of investors) {
+    const stance = stanceAt(inv, price);
+    if (stance === "buying") buyers.push(inv);
+    else if (stance === "selling") sellers.push(inv);
+  }
+  buyers.sort((a, b) => b.v_cents - a.v_cents || a.name.localeCompare(b.name));
+  sellers.sort((a, b) => a.v_cents - b.v_cents || a.name.localeCompare(b.name));
+  return { buyers, sellers };
+}
+
+function nextUp(investors, price) {
+  const candidates = [];
+  for (const inv of investors) {
+    if (inv.v_cents > price && inv.cash_cents >= price) {
+      candidates.push(inv.v_cents);
+      if (inv.cash_cents + 1 > price && inv.cash_cents + 1 < inv.v_cents) candidates.push(inv.cash_cents + 1);
+    }
+    if (inv.shares >= 1 && inv.v_cents >= price) candidates.push(inv.v_cents + 1);
+  }
+  const above = candidates.filter((c) => c > price);
+  return above.length === 0 ? null : Math.min(...above);
+}
+
+function nextDown(investors, price) {
+  const candidates = [];
+  for (const inv of investors) {
+    if (inv.v_cents < price && inv.shares >= 1) candidates.push(inv.v_cents);
+    const already = inv.v_cents > price && inv.cash_cents >= price;
+    if (!already && inv.cash_cents >= 1) {
+      const entry = Math.min(inv.v_cents - 1, inv.cash_cents);
+      if (entry >= 1 && entry < price && inv.v_cents > entry) candidates.push(entry);
+    }
+  }
+  const below = candidates.filter((c) => c < price);
+  return below.length === 0 ? null : Math.max(...below);
+}
+
+function triggerFor(investors, prev, next, direction) {
+  const changes = [];
+  for (const inv of investors) {
+    const before = stanceAt(inv, prev);
+    const after = stanceAt(inv, next);
+    if (direction === "up" && before === "buying" && after !== "buying") {
+      const kind = next === inv.v_cents ? "dropped" : "priced_out";
+      changes.push({ name: inv.name, kind });
+    } else if (direction === "up" && before !== "selling" && after === "selling") {
+      changes.push({ name: inv.name, kind: "entered" });
+    } else if (direction === "down" && before === "selling" && after !== "selling") {
+      changes.push({ name: inv.name, kind: "dropped" });
+    } else if (direction === "down" && before !== "buying" && after === "buying") {
+      changes.push({ name: inv.name, kind: "entered" });
+    }
+  }
+  changes.sort((a, b) => a.name.localeCompare(b.name));
+  return changes[0] ?? null;
+}
+
+function findGathering(investors, open) {
+  let price = open;
+  let trigger = null;
+  const seen = new Set([open]);
+
+  function refuse(wanted, heavy) {
+    const stayed = crowdAt(investors, open);
+    return {
+      price: open, trigger: null, buyers: stayed.buyers, sellers: stayed.sellers,
+      traded: false, wanted, heavy,
+    };
+  }
+
+  function settle(at, trig) {
+    const { buyers, sellers } = crowdAt(investors, at);
+    if (buyers.length === 0 || sellers.length === 0) return null;
+    return { price: at, trigger: trig, buyers, sellers, traded: true, wanted: null, heavy: null };
+  }
+
+  for (let guard = 0; guard < 64; guard++) {
+    const { buyers, sellers } = crowdAt(investors, price);
+    if (buyers.length > 0 && buyers.length === sellers.length) {
+      return { price, trigger, buyers, sellers, traded: true, wanted: null, heavy: null };
+    }
+    const heavy = buyers.length > sellers.length ? "buyers" : sellers.length > buyers.length ? "sellers" : null;
+    if (heavy == null) return refuse(null, null);
+
+    const next = heavy === "buyers" ? nextUp(investors, price) : nextDown(investors, price);
+    if (next == null || seen.has(next)) {
+      return settle(price, trigger) ?? refuse(next, heavy);
+    }
+    const after = crowdAt(investors, next);
+    const heavyCount = heavy === "buyers" ? after.buyers.length : after.sellers.length;
+    if (heavyCount === 0) {
+      return settle(price, trigger) ?? refuse(next, heavy);
+    }
+    trigger = triggerFor(investors, price, next, heavy === "buyers" ? "up" : "down");
+    price = next;
+    seen.add(price);
+  }
+  return settle(price, trigger) ?? refuse(null, null);
+}
+
+function pairTrades(buyers, sellers, price) {
+  const trades = [];
+  const pairs = Math.min(buyers.length, sellers.length);
+  for (let i = 0; i < pairs; i++) {
+    const quantity = Math.min(Math.floor(buyers[i].cash_cents / price), sellers[i].shares);
+    if (quantity < 1) continue;
+    trades.push({
+      buyer: buyers[i].name,
+      seller: sellers[i].name,
+      quantity,
+      price_cents: price,
+    });
+  }
+  return trades;
 }
 
 export function rankPnl(rows) {
@@ -94,9 +248,13 @@ export function rankPnl(rows) {
 }
 
 export function investorTape(events, name) {
-  return events.filter(
-    (e) => e.name === name || e.buyer === name || e.seller === name,
-  );
+  return events.flatMap((e) => {
+    if (e.name === name || e.buyer === name || e.seller === name) return [e];
+    if (e.kind !== "gathering") return [];
+    const trades = e.trades.filter((t) => t.buyer === name || t.seller === name);
+    if (trades.length === 0) return [];
+    return [{ ...e, trades }];
+  });
 }
 
 export function investorNew({
@@ -172,105 +330,67 @@ function attachMethods(market) {
   };
 
   market.oneTrade = () => {
-    const sellEl = market.investors.filter((i) => i.shares >= 1);
-    const buyEl = market.investors.filter((i) => i.v_cents > 0 && i.cash_cents >= i.v_cents);
-    let side = market.rng.random() < 0.5 ? "sell" : "buy";
-    let el = side === "sell" ? sellEl : buyEl;
-    if (el.length === 0) {
-      side = side === "sell" ? "buy" : "sell";
-      el = side === "sell" ? sellEl : buyEl;
-    }
-    if (el.length === 0) {
-      market.log.push("no eligible trader");
-      market.events.push({ kind: "no_eligible" });
-      return;
-    }
-
-    let buyer;
-    let seller;
-    let priceAt;
-    let size;
-
-    if (side === "sell") {
-      seller = market.rng.choice(el);
-      priceAt = seller.v_cents;
-      size = Math.max(1, Math.ceil(seller.shares * conviction(seller.stubbornness)));
-      const others = market.investors.filter((i) => i !== seller);
-      market.rng.shuffle(others);
-      buyer = others.find((o) => o.v_cents >= priceAt && o.cash_cents >= priceAt) ?? null;
-      market.events.push({
-        kind: "offer",
-        tick: market.trade_tick,
-        name: seller.name,
-        size,
-        price_cents: priceAt,
-      });
-      market.log.push(`${seller.name} offers ${size} @ ${money(priceAt)}`);
-    } else {
-      buyer = market.rng.choice(el);
-      priceAt = buyer.v_cents;
-      const capacity = Math.floor(buyer.cash_cents / priceAt);
-      size = Math.max(1, Math.ceil(capacity * conviction(buyer.stubbornness)));
-      const others = market.investors.filter((i) => i !== buyer);
-      market.rng.shuffle(others);
-      seller = others.find((o) => o.v_cents <= priceAt && o.shares >= 1) ?? null;
-      market.events.push({
-        kind: "bid",
-        tick: market.trade_tick,
-        name: buyer.name,
-        size,
-        price_cents: priceAt,
-      });
-      market.log.push(`${buyer.name} bids ${size} @ ${money(priceAt)}`);
-    }
-
-    if (buyer == null || seller == null) {
-      market.log.push("nobody takes");
-      market.events.push({ kind: "nobody_takes", tick: market.trade_tick, side });
-      return;
-    }
-
-    const negotiableMax = Math.min(size, Math.floor(buyer.cash_cents / priceAt), seller.shares);
-    const counterparty = side === "sell" ? buyer : seller;
-    const advantage =
-      side === "sell"
-        ? Math.max(0, buyer.v_cents - priceAt) / priceAt
-        : Math.max(0, priceAt - seller.v_cents) / priceAt;
-    const counterpartyConviction = conviction(counterparty.stubbornness);
-    const responseStrength =
-      counterpartyConviction + (1 - counterpartyConviction) * Math.min(1, advantage);
-    const counterproposal = Math.max(1, Math.ceil(negotiableMax * responseStrength));
-    const rangeMin = Math.min(counterproposal, negotiableMax);
-    const quantity = market.rng.randint(rangeMin, negotiableMax);
-    const buyerValue = buyer.v_cents;
-    const sellerValue = seller.v_cents;
-    const buyerConviction = conviction(buyer.stubbornness);
-    const sellerConviction = conviction(seller.stubbornness);
-
-    seller.shares -= quantity;
-    buyer.shares += quantity;
-    buyer.cash_cents -= quantity * priceAt;
-    seller.cash_cents += quantity * priceAt;
-    market.log.push(`${buyer.name} takes ${quantity} @ ${money(priceAt)}`);
-    market.events.push({
-      kind: "trade",
-      tick: market.trade_tick,
-      buyer: buyer.name,
-      seller: seller.name,
-      quantity,
-      price_cents: priceAt,
-      buyer_value_cents: buyerValue,
-      seller_value_cents: sellerValue,
-      buyer_conviction: buyerConviction,
-      seller_conviction: sellerConviction,
-      counterproposal,
-      range_min: rangeMin,
-      range_max: negotiableMax,
-    });
-    market.last_price_cents = priceAt;
     for (const inv of market.investors) {
-      inv.v_cents = nudgeV(inv.v_cents, inv.stubbornness, priceAt);
+      const up = market.rng.random() >= 0.5;
+      inv.v_cents = morningStep(inv.v_cents, inv.stubbornness, up);
     }
+
+    const open = openPlaqueCents(market.last_price_cents, market.investors);
+    const found = findGathering(market.investors, open);
+    const trades = found.traded ? pairTrades(found.buyers, found.sellers, found.price) : [];
+    for (const trade of trades) {
+      const buyer = market.investor(trade.buyer);
+      const seller = market.investor(trade.seller);
+      const cash = trade.quantity * trade.price_cents;
+      seller.shares -= trade.quantity;
+      buyer.shares += trade.quantity;
+      buyer.cash_cents -= cash;
+      seller.cash_cents += cash;
+      trade.cash_cents = cash;
+      trade.buyer_cash_cents = buyer.cash_cents;
+      trade.buyer_shares = buyer.shares;
+      trade.seller_cash_cents = seller.cash_cents;
+      trade.seller_shares = seller.shares;
+    }
+    if (trades.length > 0) {
+      market.last_price_cents = found.price;
+      for (const inv of market.investors) {
+        inv.v_cents = nudgeV(inv.v_cents, inv.stubbornness, found.price);
+      }
+    } else {
+      market.last_price_cents = open;
+      for (const inv of market.investors) {
+        inv.v_cents = missPull(inv.v_cents, inv.stubbornness, open);
+      }
+    }
+
+    const close = trades.length > 0 ? found.price : open;
+    let reason = "none";
+    if (trades.length > 0) {
+      if (close > open) reason = "rose";
+      else if (close < open) reason = "fell";
+      else reason = "held";
+    }
+    const crowd = [
+      ...found.buyers.map((inv) => ({ name: inv.name, stance: "buying" })),
+      ...found.sellers.map((inv) => ({ name: inv.name, stance: "selling" })),
+    ];
+    const deal = trades.length === 0
+      ? "no sale"
+      : trades.map((t) => `${t.buyer} buys ${t.quantity} from ${t.seller}`).join(", ");
+    market.log.push(`turn ${market.trade_tick} ${money(open)} to ${money(close)} ${deal}`);
+    market.events.push({
+      kind: "gathering",
+      tick: market.trade_tick,
+      open_cents: open,
+      close_cents: close,
+      reason,
+      trigger: trades.length > 0 ? found.trigger : null,
+      wanted_cents: trades.length > 0 ? null : found.wanted,
+      heavy: trades.length > 0 ? null : found.heavy,
+      crowd,
+      trades,
+    });
   };
 
   return market;

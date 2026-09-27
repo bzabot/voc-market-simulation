@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import {
   drawBelief,
   reservationCents,
-  conviction,
+  morningStep,
+  medianBeliefCents,
+  openPlaqueCents,
+  stanceAt,
   nudgeV,
   rankPnl,
   investorTape,
@@ -20,18 +23,18 @@ function stepUntilIpoClosed(market) {
   }
 }
 
-function tradeMarket(investors, side) {
-  const rng = createRng(0);
+function tradeMarket(investors, { tick = 1, random } = {}) {
+  const rng = createRng(1);
+  if (random) rng.random = random;
   const market = marketForTest({
     investors,
     rng,
     treasury_shares: 0,
     phase: "trade",
   });
-  market.trade_tick = 7;
-  const origRandom = rng.random.bind(rng);
-  rng.random = () => (side === "sell" ? 0 : 1);
-  return { market, restoreRandom: () => { rng.random = origRandom; } };
+  market.trade_tick = tick;
+  market.last_price_cents = 10_000;
+  return market;
 }
 
 describe("BeliefTests", () => {
@@ -119,147 +122,294 @@ describe("IpoTests", () => {
   });
 });
 
-describe("TradeTests", () => {
-  it("conviction clamps and scales stubbornness", () => {
-    assert.equal(conviction(0.0), 0.0);
-    assert.equal(conviction(0.55), 0.5);
-    assert.equal(conviction(1.0), 1.0);
+describe("GatheringTests", () => {
+  const still = { stubbornness: 1, belief: [0, 0, 0, 1] };
+
+  it("stance is buying, selling, or waiting, and never both", () => {
+    const both = investorNew({ name: "Anna", cash_cents: 50_000, shares: 10, v_cents: 15_000, ...still });
+    assert.equal(stanceAt(both, 10_000), "buying");
+    assert.equal(stanceAt(both, 15_000), "waiting");
+    assert.equal(stanceAt(both, 16_000), "selling");
+    const broke = investorNew({ name: "Jan", cash_cents: 100, shares: 0, v_cents: 15_000, ...still });
+    assert.equal(stanceAt(broke, 10_000), "waiting");
+    const holder = investorNew({ name: "Dirck", cash_cents: 0, shares: 5, v_cents: 8_000, ...still });
+    assert.equal(stanceAt(holder, 10_000), "selling");
+    assert.equal(stanceAt(holder, 8_000), "waiting");
   });
 
-  it("opening sell quantity uses capacity and conviction over ten", () => {
-    const seller = investorNew({
-      name: "Pieter", cash_cents: 0, shares: 31, belief: [1, 0, 0, 0], stubbornness: 0.55,
-    });
-    const buyer = investorNew({ name: "Anna", cash_cents: 100_000, shares: 0, belief: [0, 0, 0, 1] });
-    const { market } = tradeMarket([seller, buyer], "sell");
-    market.rng.shuffle = () => {};
-    market.rng.randint = () => 16;
-    market.oneTrade();
-    assert.deepEqual(market.events[0], {
-      kind: "offer", tick: 7, name: "Pieter", size: 16, price_cents: 2_000,
-    });
+  it("morning step is a private revision sized by stubbornness", () => {
+    const flex = morningStep(10_000, 0.2, true);
+    const stub = morningStep(10_000, 0.9, true);
+    assert.ok(flex - 10_000 > stub - 10_000);
+    assert.equal(morningStep(10_000, 0.2, false), 10_000 - (flex - 10_000));
+    assert.equal(morningStep(2_000, 0.2, false), 2_000);
+    assert.equal(morningStep(18_000, 0.2, true), 18_000);
+    assert.equal(morningStep(15_000, 1, true), 15_000);
   });
 
-  it("opening buy quantity uses affordable capacity and conviction", () => {
-    const buyer = investorNew({
-      name: "Anna", cash_cents: 61_000, shares: 0, belief: [1, 0, 0, 0], stubbornness: 0.55,
-    });
-    const seller = investorNew({ name: "Pieter", cash_cents: 0, shares: 40, belief: [1, 0, 0, 0] });
-    const { market } = tradeMarket([buyer, seller], "buy");
-    market.rng.shuffle = () => {};
-    market.rng.randint = () => 15;
-    market.oneTrade();
-    assert.deepEqual(market.events[0], {
-      kind: "bid", tick: 7, name: "Anna", size: 15, price_cents: 2_000,
-    });
+  it("open plaque blends the last sale with the median belief", () => {
+    const crowd = [
+      investorNew({ name: "Anna", cash_cents: 50_000, shares: 0, v_cents: 18_000, ...still }),
+      investorNew({ name: "Jan", cash_cents: 50_000, shares: 0, v_cents: 10_000, ...still }),
+      investorNew({ name: "Dirck", cash_cents: 0, shares: 5, v_cents: 10_000, ...still }),
+      investorNew({ name: "Maria", cash_cents: 0, shares: 5, v_cents: 10_000, ...still }),
+    ];
+    assert.equal(medianBeliefCents(crowd), 10_000);
+    assert.equal(openPlaqueCents(10_000, crowd), 10_000);
+    assert.equal(openPlaqueCents(12_000, crowd), 11_000);
   });
 
-  it("failed sell offer identifies missing buyer", () => {
-    const market = marketForTest({
-      investors: [investorNew({ name: "Anna", cash_cents: 0, shares: 20, belief: [0, 0, 0, 1] })],
-      rng: createRng(0),
-      treasury_shares: 0,
-      phase: "trade",
-    });
-    market.oneTrade();
-    assert.deepEqual(market.events.at(-1), { kind: "nobody_takes", tick: 0, side: "sell" });
-    assert.equal(market.events[0].tick, 0);
+  it("a lone optimist leaves the open near the crowd, with one buyer and many sellers", () => {
+    const investors = [
+      investorNew({ name: "Anna", cash_cents: 500_000, shares: 0, v_cents: 18_000, ...still }),
+      ...["Jan", "Dirck", "Maria", "Pieter", "Geert", "Willem", "Trijn", "Hendrick", "Lijsbet"].map(
+        (name) => investorNew({ name, cash_cents: 0, shares: 10, v_cents: 10_000, ...still }),
+      ),
+    ];
+    assert.equal(medianBeliefCents(investors), 10_000);
+    assert.equal(openPlaqueCents(12_000, investors), 11_000);
+    assert.equal(investors.filter((inv) => stanceAt(inv, 11_000) === "buying").length, 1);
+    assert.equal(investors.filter((inv) => stanceAt(inv, 11_000) === "selling").length, 9);
   });
 
-  it("failed buy bid identifies missing seller", () => {
-    const market = marketForTest({
-      investors: [investorNew({ name: "Anna", cash_cents: 50_000_00, shares: 0, belief: [0, 0, 0, 1] })],
-      rng: createRng(0),
-      treasury_shares: 0,
-      phase: "trade",
-    });
-    market.oneTrade();
-    assert.deepEqual(market.events.at(-1), { kind: "nobody_takes", tick: 0, side: "buy" });
-    assert.equal(market.events[0].tick, 0);
-  });
-
-  it("equal values trade and preserve pre-tape negotiation facts", () => {
-    const seller = investorNew({
-      name: "Pieter", cash_cents: 0, shares: 20, belief: [0.25, 0.25, 0.25, 0.25], stubbornness: 0.55,
-    });
-    const buyer = investorNew({
-      name: "Anna", cash_cents: 200_000, shares: 0, belief: [0.25, 0.25, 0.25, 0.25], stubbornness: 0.27,
-    });
-    const { market } = tradeMarket([seller, buyer], "sell");
-    market.rng.shuffle = () => {};
-    market.rng.randint = () => 8;
-    market.oneTrade();
-
-    const trade = market.events.at(-1);
-    assert.equal(trade.quantity, 8);
-    assert.equal(trade.buyer_value_cents, 10_000);
-    assert.equal(trade.seller_value_cents, 10_000);
-    assert.ok(Math.abs(trade.buyer_conviction - 0.1) < 1e-9);
-    assert.ok(Math.abs(trade.seller_conviction - 0.5) < 1e-9);
-    assert.equal(trade.counterproposal, 1);
-    assert.deepEqual([trade.range_min, trade.range_max], [1, 10]);
-    assert.ok(trade.range_min <= trade.quantity && trade.quantity <= trade.range_max);
-    assert.deepEqual(investorTape(market.events, "Anna").map((e) => e.kind), ["trade"]);
-    assert.deepEqual(investorTape(market.events, "Pieter").map((e) => e.kind), ["offer", "trade"]);
-  });
-
-  it("trade records values before following tape", () => {
-    const seller = investorNew({
-      name: "Pieter", cash_cents: 0, shares: 20, belief: [0.25, 0.25, 0.25, 0.25], stubbornness: 0.55,
-    });
-    const buyer = investorNew({
-      name: "Anna", cash_cents: 200_000, shares: 0, belief: [1, 0, 0, 0], stubbornness: 0.27, v_cents: 12_500,
-    });
-    const { market } = tradeMarket([seller, buyer], "sell");
-    market.rng.shuffle = () => {};
-    market.rng.randint = (low) => low;
-    market.oneTrade();
-    assert.equal(market.events.at(-1).buyer_value_cents, 12_500);
-    assert.notEqual(buyer.v_cents, 12_500);
-  });
-
-  it("favorable advantage raises counterproposal", () => {
-    function counterproposal(buyerValue) {
-      const seller = investorNew({
-        name: "Pieter", cash_cents: 0, shares: 20, belief: [0.25, 0.25, 0.25, 0.25], stubbornness: 0.55,
-      });
-      const buyer = investorNew({
-        name: "Anna", cash_cents: 400_000, shares: 0, belief: [1, 0, 0, 0], stubbornness: 0.27, v_cents: buyerValue,
-      });
-      const { market } = tradeMarket([seller, buyer], "sell");
-      market.rng.shuffle = () => {};
-      market.rng.randint = (low) => low;
-      market.oneTrade();
-      return market.events.at(-1).counterproposal;
-    }
-    assert.ok(counterproposal(15_000) > counterproposal(10_000));
-  });
-
-  it("first compatible counterparty alone trades and conserves assets", () => {
-    const seller = investorNew({
-      name: "Pieter", cash_cents: 0, shares: 20, belief: [1, 0, 0, 0], stubbornness: 0.9,
-    });
-    const first = investorNew({
-      name: "Anna", cash_cents: 6_000, shares: 0, belief: [0, 0, 0, 1], stubbornness: 0.9,
-    });
-    const second = investorNew({
-      name: "Maria", cash_cents: 100_000, shares: 0, belief: [0, 0, 0, 1], stubbornness: 0.9,
-    });
-    const { market } = tradeMarket([seller, first, second], "sell");
+  it("equal sides trade at the open price, keenest buyer with keenest seller", () => {
+    const anna = investorNew({ name: "Anna", cash_cents: 30_000, shares: 0, v_cents: 15_000, ...still });
+    const jan = investorNew({ name: "Jan", cash_cents: 100_000, shares: 0, v_cents: 12_000, ...still });
+    const dirck = investorNew({ name: "Dirck", cash_cents: 0, shares: 10, v_cents: 7_000, ...still });
+    const maria = investorNew({ name: "Maria", cash_cents: 0, shares: 2, v_cents: 9_000, ...still });
+    const market = tradeMarket([anna, jan, dirck, maria]);
     const cashBefore = market.investors.reduce((s, i) => s + i.cash_cents, 0);
     const sharesBefore = market.investors.reduce((s, i) => s + i.shares, 0);
-    market.rng.shuffle = () => {};
-    market.rng.randint = (_low, high) => high;
     market.oneTrade();
 
-    const trades = market.events.filter((e) => e.kind === "trade");
-    assert.equal(trades.length, 1);
-    assert.equal(trades[0].buyer, "Anna");
-    assert.equal(first.shares, 3);
-    assert.equal(second.shares, 0);
+    const gathering = market.events.at(-1);
+    assert.equal(gathering.kind, "gathering");
+    assert.equal(gathering.reason, "held");
+    assert.equal(gathering.trigger, null);
+    assert.equal(gathering.open_cents, 10_250);
+    assert.equal(gathering.close_cents, 10_250);
+    assert.equal(gathering.trades.length, 2);
+    assert.equal(gathering.trades[0].buyer, "Anna");
+    assert.equal(gathering.trades[0].seller, "Dirck");
+    assert.equal(gathering.trades[0].quantity, 2);
+    assert.equal(gathering.trades[0].price_cents, 10_250);
+    assert.equal(gathering.trades[0].cash_cents, 20_500);
+    assert.equal(gathering.trades[0].buyer_cash_cents, 9_500);
+    assert.equal(gathering.trades[0].buyer_shares, 2);
+    assert.equal(gathering.trades[0].seller_cash_cents, 20_500);
+    assert.equal(gathering.trades[0].seller_shares, 8);
+    assert.equal(gathering.trades[1].buyer, "Jan");
+    assert.equal(gathering.trades[1].seller, "Maria");
+    assert.equal(gathering.trades[1].quantity, 2);
+    assert.equal(gathering.trades[1].cash_cents, 20_500);
+    assert.equal(anna.shares, 2);
+    assert.equal(anna.cash_cents, 9_500);
+    assert.equal(jan.shares, 2);
+    assert.equal(jan.cash_cents, 79_500);
+    assert.equal(dirck.shares, 8);
+    assert.equal(dirck.cash_cents, 20_500);
+    assert.equal(maria.shares, 0);
+    assert.equal(maria.cash_cents, 20_500);
     assert.equal(market.investors.reduce((s, i) => s + i.cash_cents, 0), cashBefore);
     assert.equal(market.investors.reduce((s, i) => s + i.shares, 0), sharesBefore);
-    assert.ok(!market.events.some((e) => e.kind === "unfilled"));
+    assert.equal(market.last_price_cents, 10_250);
+  });
+
+  it("plaque rises until the extra buyer drops out", () => {
+    const anna = investorNew({ name: "Anna", cash_cents: 40 * 13_000, shares: 0, v_cents: 15_000, ...still });
+    const jan = investorNew({ name: "Jan", cash_cents: 500_000, shares: 0, v_cents: 13_000, ...still });
+    const hendrick = investorNew({ name: "Hendrick", cash_cents: 0, shares: 40, v_cents: 12_000, ...still });
+    const market = tradeMarket([anna, jan, hendrick], { tick: 12 });
+    market.oneTrade();
+
+    const gathering = market.events.at(-1);
+    assert.equal(gathering.reason, "rose");
+    assert.equal(gathering.open_cents, 11_500);
+    assert.equal(gathering.close_cents, 13_000);
+    assert.deepEqual(gathering.trigger, { name: "Jan", kind: "dropped" });
+    assert.equal(gathering.wanted_cents, null);
+    assert.deepEqual(gathering.crowd, [
+      { name: "Anna", stance: "buying" },
+      { name: "Hendrick", stance: "selling" },
+    ]);
+    assert.equal(gathering.trades.length, 1);
+    assert.equal(gathering.trades[0].buyer, "Anna");
+    assert.equal(gathering.trades[0].seller, "Hendrick");
+    assert.equal(gathering.trades[0].quantity, 40);
+    assert.equal(gathering.trades[0].price_cents, 13_000);
+    assert.equal(gathering.trades[0].cash_cents, 520_000);
+    assert.equal(gathering.trades[0].buyer_shares, 40);
+    assert.equal(gathering.trades[0].seller_shares, 0);
+    assert.equal(market.last_price_cents, 13_000);
+    assert.equal(anna.shares, 40);
+    assert.equal(hendrick.shares, 0);
+  });
+
+  it("plaque falls until the extra seller drops out", () => {
+    const anna = investorNew({ name: "Anna", cash_cents: 200_000, shares: 0, v_cents: 15_000, ...still });
+    const dirck = investorNew({ name: "Dirck", cash_cents: 0, shares: 10, v_cents: 7_000, ...still });
+    const maria = investorNew({ name: "Maria", cash_cents: 0, shares: 10, v_cents: 9_000, ...still });
+    const market = tradeMarket([anna, dirck, maria]);
+    market.oneTrade();
+
+    const gathering = market.events.at(-1);
+    assert.equal(gathering.reason, "fell");
+    assert.equal(gathering.open_cents, 9_500);
+    assert.equal(gathering.close_cents, 9_000);
+    assert.deepEqual(gathering.trigger, { name: "Maria", kind: "dropped" });
+    assert.equal(gathering.trades.length, 1);
+    assert.equal(gathering.trades[0].buyer, "Anna");
+    assert.equal(gathering.trades[0].seller, "Dirck");
+    assert.equal(gathering.trades[0].quantity, 10);
+    assert.equal(gathering.trades[0].price_cents, 9_000);
+    assert.equal(gathering.trades[0].cash_cents, 90_000);
+    assert.equal(market.last_price_cents, 9_000);
+  });
+
+  it("plaque falls until a buyer will enter", () => {
+    const willem = investorNew({ name: "Willem", cash_cents: 200_000, shares: 0, v_cents: 8_000, ...still });
+    const dirck = investorNew({ name: "Dirck", cash_cents: 0, shares: 5, v_cents: 7_000, ...still });
+    const maria = investorNew({ name: "Maria", cash_cents: 0, shares: 5, v_cents: 12_000, ...still });
+    const pieter = investorNew({ name: "Pieter", cash_cents: 0, shares: 0, v_cents: 13_000, ...still });
+    const market = tradeMarket([willem, dirck, maria, pieter]);
+    market.oneTrade();
+
+    const gathering = market.events.at(-1);
+    assert.equal(gathering.reason, "fell");
+    assert.equal(gathering.open_cents, 10_000);
+    assert.equal(gathering.close_cents, 7_999);
+    assert.deepEqual(gathering.trigger, { name: "Willem", kind: "entered" });
+    assert.equal(gathering.trades[0].buyer, "Willem");
+    assert.equal(gathering.trades[0].seller, "Dirck");
+  });
+
+  it("plaque rises until a buyer can no longer pay", () => {
+    const anna = investorNew({ name: "Anna", cash_cents: 500_000, shares: 0, v_cents: 15_000, ...still });
+    const jan = investorNew({ name: "Jan", cash_cents: 10_500, shares: 0, v_cents: 14_000, ...still });
+    const hendrick = investorNew({ name: "Hendrick", cash_cents: 0, shares: 4, v_cents: 8_000, ...still });
+    const pieter = investorNew({ name: "Pieter", cash_cents: 0, shares: 0, v_cents: 6_000, ...still });
+    const market = tradeMarket([anna, jan, hendrick, pieter]);
+    market.oneTrade();
+
+    const gathering = market.events.at(-1);
+    assert.equal(gathering.reason, "rose");
+    assert.equal(gathering.open_cents, 10_500);
+    assert.equal(gathering.close_cents, 10_501);
+    assert.deepEqual(gathering.trigger, { name: "Jan", kind: "priced_out" });
+    assert.equal(gathering.trades[0].buyer, "Anna");
+    assert.equal(gathering.trades[0].seller, "Hendrick");
+  });
+
+  it("a refused step posts the plaque, records the wanted price, and pulls beliefs toward it", () => {
+    const anna = investorNew({
+      name: "Anna", cash_cents: 500_000, shares: 0, v_cents: 15_000, stubbornness: 0.2, belief: [0, 0, 0, 1],
+    });
+    const market = tradeMarket([anna], { random: () => 0 });
+    market.oneTrade();
+
+    const gathering = market.events.at(-1);
+    assert.equal(gathering.reason, "none");
+    assert.equal(gathering.heavy, "buyers");
+    assert.equal(gathering.wanted_cents, 14_360);
+    assert.equal(gathering.open_cents, 12_180);
+    assert.equal(gathering.close_cents, 12_180);
+    assert.deepEqual(gathering.trades, []);
+    assert.equal(market.last_price_cents, 12_180);
+    assert.equal(anna.v_cents, 12_180);
+    assert.deepEqual(gathering.crowd, [{ name: "Anna", stance: "buying" }]);
+  });
+
+  it("a short side still trades when the plaque cannot fully balance", () => {
+    const anna = investorNew({ name: "Anna", cash_cents: 500_000, shares: 0, v_cents: 11_000, ...still });
+    const jan = investorNew({ name: "Jan", cash_cents: 500_000, shares: 0, v_cents: 11_000, ...still });
+    const dirck = investorNew({ name: "Dirck", cash_cents: 0, shares: 20, v_cents: 10_000, ...still });
+    const market = tradeMarket([anna, jan, dirck]);
+    market.oneTrade();
+    const gathering = market.events.at(-1);
+    assert.equal(gathering.open_cents, 10_500);
+    assert.equal(gathering.close_cents, 10_500);
+    assert.ok(gathering.trades.length >= 1);
+    assert.equal(gathering.trades[0].buyer, "Anna");
+    assert.equal(gathering.trades[0].seller, "Dirck");
+    assert.equal(gathering.crowd.filter((p) => p.stance === "buying").length, 2);
+    assert.equal(gathering.crowd.filter((p) => p.stance === "selling").length, 1);
+  });
+
+  it("nobody at the plaque leaves no wanted price", () => {
+    const anna = investorNew({ name: "Anna", cash_cents: 50_000, shares: 10, v_cents: 10_000, ...still });
+    const market = tradeMarket([anna]);
+    market.oneTrade();
+    const gathering = market.events.at(-1);
+    assert.equal(gathering.reason, "none");
+    assert.equal(gathering.wanted_cents, null);
+    assert.equal(gathering.trigger, null);
+    assert.deepEqual(gathering.trades, []);
+    assert.deepEqual(gathering.crowd, []);
+  });
+
+  it("a run of seeds does not freeze the plaque for long", () => {
+    let worstStreak = 0;
+    let worstMissStreak = 0;
+    for (let seed = 1; seed <= 20; seed++) {
+      const market = marketNew({ seed });
+      while (market.step());
+      const gatherings = market.events.filter((e) => e.kind === "gathering");
+      let streak = 1;
+      let missRun = 0;
+      for (let i = 0; i < gatherings.length; i++) {
+        if (gatherings[i].trades.length === 0) {
+          missRun += 1;
+          worstMissStreak = Math.max(worstMissStreak, missRun);
+        } else {
+          missRun = 0;
+        }
+        if (i === 0) continue;
+        if (gatherings[i].close_cents === gatherings[i - 1].close_cents) {
+          streak += 1;
+          worstStreak = Math.max(worstStreak, streak);
+        } else {
+          streak = 1;
+        }
+      }
+    }
+    assert.ok(worstStreak <= 8);
+    assert.ok(worstMissStreak <= 4);
+  });
+
+  it("a full run keeps every share and gathers once a turn", () => {
+    const market = marketNew({ seed: 7 });
+    while (market.step());
+    const held = market.investors.reduce((sum, inv) => sum + inv.shares, 0);
+    assert.equal(held + market.treasury_shares, 1000);
+    assert.equal(market.phase, "voyage");
+    const gatherings = market.events.filter((e) => e.kind === "gathering");
+    assert.equal(gatherings.length, 40);
+    for (const gathering of gatherings) {
+      assert.ok(["held", "rose", "fell", "none"].includes(gathering.reason));
+      if (gathering.trades.length > 0) assert.equal(gathering.close_cents, gathering.trades[0].price_cents);
+    }
+  });
+
+  it("a trade nudges every belief toward the close once", () => {
+    const anna = investorNew({
+      name: "Anna", cash_cents: 500_000, shares: 0, v_cents: 15_000, stubbornness: 0.2, belief: [0, 0, 0, 1],
+    });
+    const dirck = investorNew({
+      name: "Dirck", cash_cents: 0, shares: 20, v_cents: 8_000, stubbornness: 0.2, belief: [1, 0, 0, 0],
+    });
+    const pieter = investorNew({
+      name: "Pieter", cash_cents: 0, shares: 0, v_cents: 10_000, stubbornness: 0.9, belief: [0.25, 0.25, 0.25, 0.25],
+    });
+    const market = tradeMarket([anna, dirck, pieter], { random: () => 0 });
+    market.oneTrade();
+
+    const close = market.last_price_cents;
+    assert.equal(close, 9_960);
+    assert.equal(anna.v_cents, nudgeV(morningStep(15_000, 0.2, false), 0.2, close));
+    assert.equal(dirck.v_cents, nudgeV(morningStep(8_000, 0.2, false), 0.2, close));
+    assert.equal(pieter.v_cents, nudgeV(morningStep(10_000, 0.9, false), 0.9, close));
+    const twice = nudgeV(anna.v_cents, 0.2, close);
+    assert.notEqual(anna.v_cents, twice);
   });
 });
 
@@ -292,19 +442,18 @@ describe("TapeTests", () => {
     assert.ok(jumpy > stuck);
   });
 
-  it("failed offer does not change v", () => {
-    const seller = investorNew({ name: "Anna", cash_cents: 0, shares: 20, belief: [0, 0, 0, 1] });
-    const buyer = investorNew({ name: "Pieter", cash_cents: 50_000_00, shares: 0, belief: [1, 0, 0, 0] });
+  it("ipo does not step beliefs", () => {
     const rng = createRng(1);
     const market = marketForTest({
-      investors: [seller, buyer], rng, treasury_shares: 0, phase: "trade",
+      investors: [
+        investorNew({
+          name: "Anna", cash_cents: 50_000, shares: 0, belief: [0, 0, 1, 0], stubbornness: 0.2,
+        }),
+      ],
+      rng,
     });
-    const v0 = seller.v_cents;
-    const v1 = buyer.v_cents;
-    rng.random = () => 0;
-    market.oneTrade();
-    assert.equal(seller.v_cents, v0);
-    assert.equal(buyer.v_cents, v1);
+    stepUntilIpoClosed(market);
+    assert.equal(market.investor("Anna").v_cents, 13_000);
   });
 
   it("nudge clamps to payoff range", () => {
@@ -450,35 +599,45 @@ describe("TapeTestsFilter", () => {
   it("investor tape keeps events involving name", () => {
     const events = [
       { kind: "ipo_fill", name: "Anna", size: 10 },
-      { kind: "offer", name: "Pieter", size: 2 },
-      { kind: "trade", buyer: "Anna", seller: "Pieter", quantity: 2 },
+      {
+        kind: "gathering",
+        tick: 3,
+        open_cents: 10_000,
+        close_cents: 10_000,
+        trades: [
+          { buyer: "Anna", seller: "Pieter", quantity: 2, price_cents: 10_000 },
+          { buyer: "Jan", seller: "Maria", quantity: 5, price_cents: 10_000 },
+        ],
+      },
       { kind: "payout", name: "Willem", size: 1 },
     ];
     const tape = investorTape(events, "Anna");
-    assert.deepEqual(tape.map((e) => e.kind), ["ipo_fill", "trade"]);
-    assert.equal(investorTape(events, "Pieter")[0].kind, "offer");
-    assert.equal(investorTape(events, "Pieter")[1].kind, "trade");
+    assert.deepEqual(tape.map((e) => e.kind), ["ipo_fill", "gathering"]);
+    assert.deepEqual(tape[1].trades, [
+      { buyer: "Anna", seller: "Pieter", quantity: 2, price_cents: 10_000 },
+    ]);
+    assert.equal(investorTape(events, "Pieter")[0].trades.length, 1);
+    assert.equal(investorTape(events, "Willem").length, 1);
+    assert.equal(investorTape(events, "Dirck").length, 0);
   });
 });
 
 describe("inspectInvestor", () => {
   it("returns tape and pnl fields for named investor", () => {
     const seller = investorNew({
-      name: "Pieter", cash_cents: 0, shares: 20, belief: [0.25, 0.25, 0.25, 0.25], stubbornness: 0.55,
+      name: "Pieter", cash_cents: 0, shares: 20, v_cents: 8_000, belief: [1, 0, 0, 0], stubbornness: 1,
     });
     const buyer = investorNew({
-      name: "Anna", cash_cents: 200_000, shares: 0, belief: [0.25, 0.25, 0.25, 0.25], stubbornness: 0.27,
+      name: "Anna", cash_cents: 200_000, shares: 0, v_cents: 15_000, belief: [0, 0, 0, 1], stubbornness: 1,
     });
-    const { market } = tradeMarket([seller, buyer], "sell");
-    market.rng.shuffle = () => {};
-    market.rng.randint = () => 8;
+    const market = tradeMarket([seller, buyer]);
     market.oneTrade();
     const info = inspectInvestor(market, "Anna");
     assert.equal(info.name, "Anna");
     assert.equal(info.start_cents, buyer.start_cash_cents);
     assert.equal(info.end_cents, buyer.cash_cents);
     assert.equal(info.total_cents, info.end_cents - info.start_cents);
-    assert.equal(info.stubbornness, 0.27);
-    assert.deepEqual(info.tape.map((e) => e.kind), ["trade"]);
+    assert.equal(info.stubbornness, 1);
+    assert.deepEqual(info.tape.map((e) => e.kind), ["gathering"]);
   });
 });

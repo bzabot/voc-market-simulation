@@ -1,8 +1,7 @@
 import { Select } from '@base-ui/react/select'
 import { investorColor } from '../colors'
 import { money, signedMoney, signedPct, stubbornLabel } from '../format'
-import { EventBody } from './EventFeed'
-import { KIND_STYLE } from './kindStyle'
+import { EventRow } from './EventFeed'
 import { ShipIcon } from './icons'
 
 export default function ReplayPanel({
@@ -130,17 +129,11 @@ export default function ReplayPanel({
                 {inspect.tape.length === 0 && (
                   <li className="sentence py-4 text-center text-mute">(never traded)</li>
                 )}
-                {inspect.tape.map((e, i) => {
-                  const style = KIND_STYLE[e.kind] ?? KIND_STYLE.nobody_takes
-                  return (
-                    <li key={i} className="flex items-baseline gap-2 rounded-lg px-2 py-1 text-dim odd:bg-raised">
-                      <span className={`kicker shrink-0 rounded border px-1.5 py-px ${style.cls}`}>
-                        {style.label}
-                      </span>
-                      <span className="min-w-0"><EventBody e={e} /></span>
-                    </li>
-                  )
-                })}
+                {inspect.tape.map((e, i) => (
+                  <li key={i}>
+                    <EventRow e={e} index={i} fresh={false} viewer={selectedName} />
+                  </li>
+                ))}
               </ol>
             </>
           ) : (

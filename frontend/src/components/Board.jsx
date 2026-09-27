@@ -1,9 +1,13 @@
 import AnimatedNumber from './AnimatedNumber'
 import { investorColor } from '../colors'
 import { money, TOTAL_SHARES } from '../format'
+import { stanceAt, worthCents } from '../sim.js'
+
+const STANCE_LABEL = { buying: 'Buying', selling: 'Selling', waiting: 'Waiting' }
+const STANCE_CLASS = { buying: 'text-sea', selling: 'text-dim', waiting: 'text-mute' }
 
 const COLS =
-  'grid grid-cols-[1.4rem_1fr_6.5rem_9rem_7rem] items-center gap-3 max-lg:grid-cols-[1.4rem_1fr_5.5rem_6rem]'
+  'grid grid-cols-[1.4rem_minmax(0,1.1fr)_5.5rem_5.5rem_7.5rem_6.5rem] items-center gap-2 max-lg:grid-cols-[1.4rem_1fr_5rem_5rem_6rem]'
 
 export default function Board({ frame, newEvents }) {
   if (!frame) {
@@ -11,7 +15,7 @@ export default function Board({ frame, newEvents }) {
       <section className="panel animate-fade-up">
         <h2 className="panel-title mb-3">Ownership board</h2>
         <p className="sentence py-10 text-center text-mute">
-          The floor is empty &mdash; press <kbd>space</kbd> to open the offering.
+          No shares are held yet. Press <kbd>space</kbd> to open the offering.
         </p>
       </section>
     )
@@ -21,12 +25,14 @@ export default function Board({ frame, newEvents }) {
   const maxShares = Math.max(1, ...investors.map((i) => i.shares))
   const price = frame.last_price_cents
 
-  const flash = new Map()
+  const flash = new Set()
   for (const e of newEvents) {
-    if (e.kind === 'trade') {
-      flash.set(e.buyer, 'gain')
-      flash.set(e.seller, 'loss')
-    } else if (e.kind === 'ipo_fill' || e.kind === 'payout') flash.set(e.name, 'gain')
+    if (e.kind === 'gathering') {
+      for (const trade of e.trades) {
+        flash.add(trade.buyer)
+        flash.add(trade.seller)
+      }
+    } else if (e.kind === 'ipo_fill' || e.kind === 'payout') flash.add(e.name)
   }
 
   return (
@@ -40,6 +46,7 @@ export default function Board({ frame, newEvents }) {
         <span>#</span>
         <span>Investor</span>
         <span className="text-right">Cash</span>
+        <span className="text-right" title="Cash plus belief times shares">Worth</span>
         <span className="max-lg:hidden">Stake</span>
         <span className="text-right">Belief / share</span>
       </div>
@@ -47,14 +54,12 @@ export default function Board({ frame, newEvents }) {
       <ul className="space-y-1">
         {investors.map((inv, rank) => {
           const pct = (100 * inv.shares) / TOTAL_SHARES
-          const above = inv.v_cents >= price
-          const flashKind = flash.get(inv.name)
+          const stance = stanceAt(inv, price)
+          const traded = flash.has(inv.name)
           return (
             <li
               key={inv.name}
-              className={`${COLS} rounded-lg px-2 py-1.5 ${
-                flashKind === 'gain' ? 'row-flash-gain' : flashKind === 'loss' ? 'row-flash-loss' : ''
-              }`}
+              className={`${COLS} rounded-lg px-2 py-1.5 ${traded ? 'bg-raised/70' : ''}`}
             >
               <span className="text-mute">{rank + 1}</span>
 
@@ -65,7 +70,7 @@ export default function Board({ frame, newEvents }) {
                 />
                 <span className="truncate font-medium text-text">{inv.name}</span>
                 <span className="text-mute max-lg:hidden">
-                  {inv.shares} sh &middot; {pct.toFixed(1)}%
+                  {inv.shares} sh · {pct.toFixed(1)}%
                 </span>
               </span>
 
@@ -73,6 +78,12 @@ export default function Board({ frame, newEvents }) {
                 value={inv.cash_cents}
                 format={money}
                 className="text-right text-dim"
+              />
+
+              <AnimatedNumber
+                value={worthCents(inv)}
+                format={money}
+                className="text-right text-text"
               />
 
               <span className="flex items-center gap-2 max-lg:hidden">
@@ -94,9 +105,9 @@ export default function Board({ frame, newEvents }) {
                 <AnimatedNumber
                   value={inv.v_cents ?? 0}
                   format={money}
-                  className={above ? 'text-gain' : 'text-loss'}
+                  className="text-text"
                 />
-                <span className="ml-1 text-[12px] text-mute">{above ? '\u2265 mkt' : '< mkt'}</span>
+                <span className={`ml-1 text-[12px] ${STANCE_CLASS[stance]}`}>{STANCE_LABEL[stance]}</span>
               </span>
             </li>
           )
@@ -108,7 +119,7 @@ export default function Board({ frame, newEvents }) {
             <span className="size-2 rounded-full bg-mute" />
             <span className="font-medium text-dim">Company treasury</span>
             <span className="text-mute max-lg:hidden">
-              {frame.treasury_shares} sh &middot; {((100 * frame.treasury_shares) / TOTAL_SHARES).toFixed(1)}%
+              {frame.treasury_shares} sh · {((100 * frame.treasury_shares) / TOTAL_SHARES).toFixed(1)}%
             </span>
           </span>
           <AnimatedNumber
@@ -116,6 +127,7 @@ export default function Board({ frame, newEvents }) {
             format={money}
             className="text-right text-dim"
           />
+          <span className="text-right text-mute">—</span>
           <span className="flex items-center gap-2 max-lg:hidden">
             <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-line">
               <span
@@ -127,7 +139,7 @@ export default function Board({ frame, newEvents }) {
               {((100 * frame.treasury_shares) / TOTAL_SHARES).toFixed(1)}%
             </span>
           </span>
-          <span className="text-right text-mute">&mdash;</span>
+          <span className="text-right text-mute">—</span>
         </li>
       </ul>
     </section>
