@@ -95,11 +95,28 @@ export function openPlaqueCents(lastSaleCents, investors) {
   return pyRound(0.5 * lastSaleCents + 0.5 * medianBeliefCents(investors), 0);
 }
 
+export function displayName(nickname) {
+  return `${nickname} (You)`;
+}
+
+export function npcInvestors(investors) {
+  return investors.filter((inv) => !inv.is_human);
+}
+
+export function openPlaquePreview(lastSaleCents, investors) {
+  return openPlaqueCents(lastSaleCents, npcInvestors(investors));
+}
+
 export function worthCents(investor) {
   return investor.cash_cents + investor.shares * investor.v_cents;
 }
 
 export function stanceAt(investor, price) {
+  if (investor.is_human) {
+    if (investor.human_side === "buy" && investor.cash_cents >= price) return "buying";
+    if (investor.human_side === "sell" && investor.shares >= 1) return "selling";
+    return "waiting";
+  }
   if (investor.v_cents > price && investor.cash_cents >= price) return "buying";
   if (investor.v_cents < price && investor.shares >= 1) return "selling";
   return "waiting";
@@ -132,14 +149,19 @@ function crowdAt(investors, price) {
     if (stance === "buying") buyers.push(inv);
     else if (stance === "selling") sellers.push(inv);
   }
-  buyers.sort((a, b) => b.v_cents - a.v_cents || a.name.localeCompare(b.name));
-  sellers.sort((a, b) => a.v_cents - b.v_cents || a.name.localeCompare(b.name));
+  const humanFirst = (a, b) => (b.is_human ? 1 : 0) - (a.is_human ? 1 : 0);
+  buyers.sort((a, b) => humanFirst(a, b) || b.v_cents - a.v_cents || a.name.localeCompare(b.name));
+  sellers.sort((a, b) => humanFirst(a, b) || a.v_cents - b.v_cents || a.name.localeCompare(b.name));
   return { buyers, sellers };
 }
 
 function nextUp(investors, price) {
   const candidates = [];
   for (const inv of investors) {
+    if (inv.is_human) {
+      if (stanceAt(inv, price) === "buying") candidates.push(inv.cash_cents + 1);
+      continue;
+    }
     if (inv.v_cents > price && inv.cash_cents >= price) {
       candidates.push(inv.v_cents);
       if (inv.cash_cents + 1 > price && inv.cash_cents + 1 < inv.v_cents) candidates.push(inv.cash_cents + 1);
@@ -153,6 +175,7 @@ function nextUp(investors, price) {
 function nextDown(investors, price) {
   const candidates = [];
   for (const inv of investors) {
+    if (inv.is_human) continue;
     if (inv.v_cents < price && inv.shares >= 1) candidates.push(inv.v_cents);
     const already = inv.v_cents > price && inv.cash_cents >= price;
     if (!already && inv.cash_cents >= 1) {
@@ -169,6 +192,12 @@ function triggerFor(investors, prev, next, direction) {
   for (const inv of investors) {
     const before = stanceAt(inv, prev);
     const after = stanceAt(inv, next);
+    if (inv.is_human) {
+      if (direction === "up" && before === "buying" && after !== "buying") {
+        changes.push({ name: inv.name, kind: "priced_out" });
+      }
+      continue;
+    }
     if (direction === "up" && before === "buying" && after !== "buying") {
       const kind = next === inv.v_cents ? "dropped" : "priced_out";
       changes.push({ name: inv.name, kind });
@@ -227,11 +256,20 @@ function findGathering(investors, open) {
   return settle(price, trigger) ?? refuse(null, null);
 }
 
+function sizeCap(investor) {
+  return investor.is_human ? investor.human_qty : Infinity;
+}
+
 function pairTrades(buyers, sellers, price) {
   const trades = [];
   const pairs = Math.min(buyers.length, sellers.length);
   for (let i = 0; i < pairs; i++) {
-    const quantity = Math.min(Math.floor(buyers[i].cash_cents / price), sellers[i].shares);
+    const quantity = Math.min(
+      Math.floor(buyers[i].cash_cents / price),
+      sellers[i].shares,
+      sizeCap(buyers[i]),
+      sizeCap(sellers[i]),
+    );
     if (quantity < 1) continue;
     trades.push({
       buyer: buyers[i].name,
@@ -265,6 +303,7 @@ export function investorNew({
   start_cash_cents = null,
   stubbornness = 0.5,
   v_cents = null,
+  seat = null,
 }) {
   const start = start_cash_cents ?? cash_cents;
   const v = v_cents ?? reservationCents(belief);
@@ -276,6 +315,10 @@ export function investorNew({
     start_cash_cents: start,
     stubbornness,
     v_cents: v,
+    seat: seat ?? name,
+    is_human: false,
+    human_side: null,
+    human_qty: 0,
   };
 }
 
@@ -301,6 +344,9 @@ function attachMethods(market) {
       v_cents: inv.v_cents,
       start_cash_cents: inv.start_cash_cents,
       stubbornness: inv.stubbornness,
+      seat: inv.seat,
+      is_human: inv.is_human,
+      human_side: inv.human_side,
     })),
     log: [...market.log],
     events: market.events.map((e) => ({ ...e })),
@@ -317,8 +363,34 @@ function attachMethods(market) {
     return rankPnl(rows);
   };
 
-  market.step = () => {
+  market.human = () => market.investors.find((inv) => inv.is_human) ?? null;
+
+  market.peek = () => {
+    if (market.done) return { kind: "done" };
+    if (market.phase === "ipo" && !market._ipoFinished) {
+      const order = ensureIpoOrder(market);
+      for (let i = market._ipoIndex; i < order.length; i++) {
+        const inv = market.investor(order[i]);
+        if (inv.is_human) return { kind: "human_ipo" };
+        if (inv.v_cents >= IPO_PRICE_CENTS && ipoAvailable(market, inv) >= 1) {
+          return { kind: "npc_ipo", name: inv.name };
+        }
+      }
+      return { kind: "ipo_close" };
+    }
+    if (market.phase !== "voyage" && market.trade_tick < TRADE_TICKS) {
+      return {
+        kind: "trade",
+        open_preview_cents: openPlaquePreview(market.last_price_cents, market.investors),
+        tick: market.trade_tick + 1,
+      };
+    }
+    return { kind: "voyage" };
+  };
+
+  market.step = (action = { type: "none" }) => {
     if (market.done) return false;
+    market._humanAction = action;
     const result = market._gen.next();
     if (result.done) {
       market.done = true;
@@ -330,12 +402,21 @@ function attachMethods(market) {
   };
 
   market.oneTrade = () => {
-    for (const inv of market.investors) {
+    const human = market.human();
+    if (human) {
+      const action = market._humanAction ?? { type: "none" };
+      const side = action.type === "buy" ? "buy" : action.type === "sell" ? "sell" : null;
+      human.human_side = side;
+      human.human_qty = side == null ? 0 : Math.max(0, action.quantity ?? 0);
+    }
+    const npcs = npcInvestors(market.investors);
+
+    for (const inv of npcs) {
       const up = market.rng.random() >= 0.5;
       inv.v_cents = morningStep(inv.v_cents, inv.stubbornness, up);
     }
 
-    const open = openPlaqueCents(market.last_price_cents, market.investors);
+    const open = openPlaqueCents(market.last_price_cents, npcs);
     const found = findGathering(market.investors, open);
     const trades = found.traded ? pairTrades(found.buyers, found.sellers, found.price) : [];
     for (const trade of trades) {
@@ -354,15 +435,16 @@ function attachMethods(market) {
     }
     if (trades.length > 0) {
       market.last_price_cents = found.price;
-      for (const inv of market.investors) {
+      for (const inv of npcs) {
         inv.v_cents = nudgeV(inv.v_cents, inv.stubbornness, found.price);
       }
     } else {
       market.last_price_cents = open;
-      for (const inv of market.investors) {
+      for (const inv of npcs) {
         inv.v_cents = missPull(inv.v_cents, inv.stubbornness, open);
       }
     }
+    if (human) human.v_cents = market.last_price_cents;
 
     const close = trades.length > 0 ? found.price : open;
     let reason = "none";
@@ -396,33 +478,58 @@ function attachMethods(market) {
   return market;
 }
 
+function ipoAvailable(market, investor) {
+  return Math.min(Math.floor(investor.cash_cents / IPO_PRICE_CENTS), market.treasury_shares);
+}
+
+function ensureIpoOrder(market) {
+  if (market._ipoOrder == null) {
+    const order = [...market.investors];
+    market.rng.shuffle(order);
+    market._ipoOrder = order.map((inv) => inv.name);
+    market._ipoIndex = 0;
+  }
+  return market._ipoOrder;
+}
+
+function ipoFill(market, investor, qty) {
+  investor.shares += qty;
+  investor.cash_cents -= qty * IPO_PRICE_CENTS;
+  market.treasury_shares -= qty;
+  market.company_cash_cents += qty * IPO_PRICE_CENTS;
+  market.log.push(`${investor.name} buys ${qty} @ $100.00 IPO`);
+  market.events.push({
+    kind: "ipo_fill",
+    name: investor.name,
+    size: qty,
+    price_cents: IPO_PRICE_CENTS,
+  });
+}
+
 function* ipoEvents(market) {
   market.phase = "ipo";
   market.header = "IPO";
-  const order = [...market.investors];
-  market.rng.shuffle(order);
-  for (const inv of order) {
-    if (inv.v_cents < IPO_PRICE_CENTS) continue;
-    const available = Math.min(
-      Math.floor(inv.cash_cents / IPO_PRICE_CENTS),
-      market.treasury_shares,
-    );
-    if (available < 1) continue;
-    const qty = market.rng.randint(1, available);
-    inv.shares += qty;
-    inv.cash_cents -= qty * IPO_PRICE_CENTS;
-    market.treasury_shares -= qty;
-    market.company_cash_cents += qty * IPO_PRICE_CENTS;
-    market.log.push(`${inv.name} buys ${qty} @ $100.00 IPO`);
-    market.events.push({
-      kind: "ipo_fill",
-      name: inv.name,
-      size: qty,
-      price_cents: IPO_PRICE_CENTS,
-    });
-    yield;
+  const order = ensureIpoOrder(market);
+  while (market._ipoIndex < order.length) {
+    const inv = market.investor(order[market._ipoIndex]);
+    market._ipoIndex += 1;
+    if (inv.is_human) {
+      const action = market._humanAction ?? { type: "none" };
+      const available = ipoAvailable(market, inv);
+      if (action.type === "ipo_subscribe" && available >= 1) {
+        ipoFill(market, inv, Math.min(Math.max(1, action.quantity ?? 1), available));
+      }
+      yield;
+    } else if (inv.v_cents >= IPO_PRICE_CENTS) {
+      const available = ipoAvailable(market, inv);
+      if (available >= 1) {
+        ipoFill(market, inv, market.rng.randint(1, available));
+        yield;
+      }
+    }
     if (market.treasury_shares === 0) break;
   }
+  market._ipoFinished = true;
   market.log.push("IPO closed");
   market.events.push({ kind: "ipo_closed" });
   yield;
@@ -487,6 +594,10 @@ function baseMarket(fields) {
     header: "IPO",
     trade_tick: 0,
     done: false,
+    _ipoOrder: null,
+    _ipoIndex: 0,
+    _ipoFinished: false,
+    _humanAction: { type: "none" },
     ...fields,
   };
   attachMethods(market);
@@ -494,7 +605,7 @@ function baseMarket(fields) {
   return market;
 }
 
-export function marketNew({ seed, rng } = {}) {
+export function marketNew({ seed, rng, human = null } = {}) {
   const s = seed ?? Math.floor(Math.random() * 2 ** 31);
   const r = rng ?? createRng(s);
   const names = [...NAMES];
@@ -512,6 +623,12 @@ export function marketNew({ seed, rng } = {}) {
     }),
   );
   const hidden_outcome = r.choice(Object.keys(OUTCOMES_CENTS_PER_SHARE));
+  if (human) {
+    const seat = investors.find((inv) => inv.name === human.seat);
+    if (!seat) throw new Error(human.seat);
+    seat.is_human = true;
+    seat.name = displayName(human.nickname);
+  }
   return baseMarket({ rng: r, investors, hidden_outcome });
 }
 
